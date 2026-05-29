@@ -1,0 +1,120 @@
+---
+title: "Edit and Annotate Photos with the Image Editor"
+sidebarTitle: "Photo Editor"
+description: "Open images, adjust brightness, contrast, and saturation, draw with a configurable brush, crop, save in any format, and view GPS EXIF coordinates on a map."
+---
+
+**FormEditarFotos** is the built-in image editor for Explorador de Archivos. It opens automatically when you double-click a JPG, PNG, or GIF in the file explorer, and it uses `ImageProcessor.Adjust` internally for all color transformations. From a single window you can fine-tune colors, annotate with a freehand brush, crop to a region of interest, and even see exactly where a photo was taken on an interactive map.
+
+## Opening an Image
+
+<Steps>
+  <Step title="Double-click from the file explorer">
+    Double-clicking any supported image file calls `AbrirImagen(path)` on the form, which loads the file into a `Bitmap`, stores the path as `bitmap.Tag` for metadata reading, and resets all adjustment sliders to zero.
+  </Step>
+  <Step title="Use the Open button inside the form">
+    Click the **Open** button to browse for a file with the `OpenFileDialog`. The filter covers every common raster format:
+
+    ```
+    *.bmp, *.dib, *.jpg, *.jpeg, *.jpe, *.jfif,
+    *.png, *.gif, *.tif, *.tiff, *.ico
+    ```
+  </Step>
+</Steps>
+
+After loading, two internal bitmaps are created: `loadedBitmap` (the untouched original) and `workingBitmap` (the editable copy shown on the canvas).
+
+## Color Adjustments
+
+Three trackbars let you adjust the image non-destructively. Moving any slider immediately calls `ImageProcessor.Adjust` with the current values and redraws the canvas.
+
+| Slider | Range | Effect |
+|--------|-------|--------|
+| **Brightness** | −100 to +100 | Shifts all channels lighter or darker |
+| **Contrast** | −100 to +100 | Expands or compresses the tonal range |
+| **Saturation** | −100 to +100 | Boosts or drains color intensity |
+
+Internally, `TrackBar_Scroll` reads the three values and calls:
+
+```csharp
+workingBitmap = ImageProcessor.Adjust(source, brightness, contrast, saturation);
+```
+
+`ImageProcessor.Adjust` builds three separate 5×5 `ColorMatrix` objects (one each for contrast, saturation, and brightness) and multiplies them together before applying the combined matrix via `ImageAttributes` to produce a new `Format32bppArgb` bitmap.
+
+```csharp
+// brightness, contrast, saturation: -100..100
+public static Bitmap Adjust(Bitmap source, int brightness, int contrast, int saturation)
+```
+
+The **Revert** button (`btnRevert_Click`) discards all changes by cloning `loadedBitmap` back into `workingBitmap` and resetting every slider — including the brush-size trackbar — to its default value.
+
+Beyond the three sliders, three one-click filters are also available:
+
+- **Grayscale** — `ImageProcessor.ApplyGrayscale` using luminance weights (R 0.299, G 0.587, B 0.114).
+- **Sepia** — `ImageProcessor.ApplySepia` with classic warm-tone matrix coefficients.
+- **Invert** — `ImageProcessor.InvertColors` negates each channel and shifts by 1.
+
+## Drawing
+
+Toggle freehand drawing by clicking the **Pincel** button; its label changes to **Pintando…** while active. The editor tracks pen state with two fields:
+
+- `isDrawing` — whether draw mode is currently on.
+- `lastPoint` — the previous mouse position, used to draw smooth `DrawLine` segments between `MouseMove` events.
+
+Rendering uses anti-aliased `LineCap.Round` strokes directly onto `workingBitmap` via `Graphics.FromImage`.
+
+| Control | Detail |
+|---------|--------|
+| **Brush color** | Click the color button to open `ColorDialog`; the chosen `Color` is stored in `brushColor` (default `Color.Black`). A preview panel updates immediately. |
+| **Brush size** | `trackBrushSize` slider — minimum **1**, default **5**. Current value is shown in `lblBrushSizeValue`. |
+
+## Crop
+
+<Steps>
+  <Step title="Enable crop mode">
+    Click the **Recortar** button. `isCropping` is set to `true` and the button label becomes **Recortando… (Click y arrastra)**.
+  </Step>
+  <Step title="Draw the crop rectangle">
+    Click and drag on the canvas. The editor records `cropStart` on `MouseDown` and continuously updates `cropRect` (a `Rectangle`) on `MouseMove`. A red dashed border is drawn by the `canvas_Paint` handler so you can see the selection.
+  </Step>
+  <Step title="Apply the crop">
+    On `MouseUp`, canvas coordinates are mapped to image coordinates using the zoom-aware `GetImageDisplayRectangle` helper. The working bitmap is clipped to the translated `cropRect` via `Bitmap.Clone(rectangle, pixelFormat)` and the canvas is refreshed.
+  </Step>
+</Steps>
+
+Clicking **Recortar** again while crop mode is active cancels the selection and clears `cropRect`.
+
+## GPS / Location
+
+When an image is opened — whether via double-click or the Open button — the editor automatically searches for EXIF GPS data using the **MetadataExtractor** library.
+
+The `ObtenerCoordenadas` helper:
+
+1. Reads `bitmap.Tag` to obtain the original file path.
+2. Calls `ImageMetadataReader.ReadMetadata(path)` to enumerate all EXIF directories.
+3. Finds the first `GpsDirectory` and calls `GetGeoLocation()`.
+4. Returns a `(double lat, double lon)` tuple if coordinates are present, or `null` otherwise.
+
+If coordinates are found:
+
+- They are displayed in `txtCoordenadas` as a decimal string, e.g. `26.79692, 101.42861`.
+- `MostrarMapa` loads a `WebView2` control with an embedded Google Maps `<iframe>` centred on the location.
+- The **Show Location** button opens the same coordinates in the default browser.
+
+If no GPS data exists, `txtCoordenadas` shows **"No se encontraron datos GPS."** You can still type coordinates manually in `lat, lon` format and click **Ver** to display them on the map.
+
+<Note>
+  GPS data requires the image to have been taken on a GPS-enabled device with location services active at the time of capture. Many photos — particularly those transferred from a scanner, exported from graphics software, or stripped of metadata — do not contain EXIF location tags.
+</Note>
+
+## Saving
+
+Click **Save As** to open a `SaveFileDialog`. The modified `workingBitmap` is written to disk using `System.Drawing.Imaging.ImageFormat`:
+
+| Filter choice | Format saved |
+|---------------|-------------|
+| PNG | `ImageFormat.Png` |
+| JPEG | `ImageFormat.Jpeg` |
+
+When saving as JPEG and valid GPS coordinates are loaded, the editor attempts to write the GPS rational EXIF properties (tags `0x0001`–`0x0004`) back into the file using `Bitmap.SetPropertyItem`. If that step fails, the file is saved without GPS data and a warning is shown.

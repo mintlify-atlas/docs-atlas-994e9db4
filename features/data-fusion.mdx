@@ -1,0 +1,125 @@
+---
+title: "Analyze Multi-Source Data in the Data Fusion Arena"
+sidebarTitle: "Data Fusion"
+description: "Import CSV, JSON, XML, TXT, Excel, Word, and live SQL databases into a unified view, then sort, filter, group, and auto-generate bar, pie, doughnut, and line charts."
+---
+
+The **Data Fusion Arena** (`FormDataBase`) is the built-in analytics workbench of Explorador de Archivos. It merges heterogeneous data sources into a single `List<DataItem>` stored in `_allItems`, backed by a fast `Dictionary<int, DataItem>` ID index (`_idIndex`) that enables O(1) lookups. A secondary `_lastImportedItems` list tracks the most recent batch for focused chart generation. Every imported record is modeled by the `DataItem` class, which carries typed properties for common domains (laptops, videogames, inventory, performance logs, database users) and an open `Dictionary<string, string> ExtraFields` collection for columns that fall outside those domains.
+
+## Importing Files
+
+Each file-type button opens an `OpenFileDialog` filtered to the matching extension. After the user confirms, the button handler calls `DataReader.LoadFromFile(path)`, which detects the extension and routes to the correct reader. The returned `List<DataItem>` is appended to `_allItems`, the ID index is rebuilt with `DataProcessor.BuildIdIndex`, and the `DataGridView` refreshes.
+
+| Button | Format | Library |
+|--------|--------|---------|
+| `btnImportCsv` | CSV | Split + header mapping |
+| `btnImportJson` | JSON | `System.Text.Json` (`JsonDocument`) |
+| `btnImportXml` | XML | `System.Xml.XmlDocument` |
+| `btnImportTxt` | Pipe-delimited TXT | Auto-delimiter detection (`\|`, `\t`, `;`, `,`) |
+| `btnImportXlsx` | Excel (`.xlsx`) | `DocumentFormat.OpenXml` |
+| `btnImportDocx` | Word (`.docx`) | `DocumentFormat.OpenXml` |
+
+Unknown column names that don't match any `DataItem` property are captured in `ExtraFields` and displayed as dynamic columns in the grid.
+
+## Importing from Databases
+
+Three dedicated buttons connect to live relational databases. Each opens a connection dialog (`DatabaseExporter.ShowImportDialog`) that collects server, port, database name, user, and password. After clicking **🔍 Listar Tablas**, the app calls the appropriate `GetTables*` method and populates a dropdown; clicking **Importar** fetches the selected table via `DataReader.ReadFrom*`.
+
+| Button | Engine | Default Port | Methods |
+|--------|--------|-------------|---------|
+| `btnImportSqlServer` | SQL Server | 1433 | `DatabaseExporter.GetTablesSqlServer` → `DataReader.ReadFromSqlServer` |
+| `btnImportMariaDb` | MariaDB | 3306 | `DatabaseExporter.GetTablesMariaDb` → `DataReader.ReadFromMariaDb` |
+| `btnImportPostgre` | PostgreSQL | 5432 | `DatabaseExporter.GetTablesPostgreSql` → `DataReader.ReadFromPostgreSql` |
+
+The database reader (`ReadItemsFromReader`) maps every result-set column to a `DataItem`; columns not matching known property names land in `ExtraFields`. The target database is created automatically if it does not exist (`EnsureSqlServer/MySql/PostgreSqlDatabase`).
+
+## Processing Data
+
+Clicking **Procesar** (`btnProcess_Click`) runs an in-memory analysis pipeline entirely without LINQ sorting operators. Results are written to the Console tab (`rtbConsole`).
+
+<Steps>
+  <Step title="Discover fields">
+    `DataProcessor.DiscoverFields(_allItems)` scans every item and returns two lists: `stringFields` (non-empty text properties + text-valued `ExtraFields`) and `numericFields` (non-zero numeric properties + numeric-valued `ExtraFields`). Both lists respect first-seen order.
+  </Step>
+  <Step title="Insertion Sort on first numeric field">
+    A working copy of `_allItems` is sorted ascending by `numericFields[0]` using `DataProcessor.DynamicSort` — a manual Insertion Sort that calls `GetNumericValue(item, fieldName)` for comparisons. Up to 15 rows are previewed.
+  </Step>
+  <Step title="75th-percentile filter">
+    `DataProcessor.ComputeThreshold(_allItems, filterField, 0.75)` builds a sorted copy of all non-zero values with a manual Insertion Sort and returns the value at index `count × 0.75`. `DataProcessor.DynamicFilter` then keeps only rows at or above that threshold.
+  </Step>
+  <Step title="Bubble Sort on second numeric field (descending)">
+    `DataProcessor.DynamicBubbleSort` sorts a copy of `_allItems` descending by `numericFields[1]` (falls back to `numericFields[0]` if only one field exists). The algorithm includes an early-exit optimization when a pass produces no swaps.
+  </Step>
+  <Step title="Grouping and aggregation">
+    The first categorical field is grouped against the first numeric field. `DataProcessor.IsAveragingField` decides whether to call `DynamicGroupAvg` (for price, temperature, FPS, etc.) or `DynamicGroupSum` (for sales, stock, counts). `DynamicGroupCount` always runs separately to show per-category record counts. All grouping uses `Dictionary<string, double>` accumulators for O(n) performance.
+  </Step>
+  <Step title="Duplicate detection">
+    `DataProcessor.DetectDuplicates` uses a `HashSet<string>` keyed on `Source:Label` to identify records that appear more than once.
+  </Step>
+  <Step title="Dictionary ID lookups">
+    Five evenly-spaced sample IDs are looked up in `_idIndex` with `TryGetValue` to demonstrate O(1) retrieval.
+  </Step>
+</Steps>
+
+## Generating Charts
+
+Clicking **Generar Gráfica** (`btnGenerateChart_Click`) calls two detection methods on `_lastImportedItems` (or `_allItems` if no import has been done in the current session):
+
+- `DataProcessor.AutoDetectSmartPairs(items, 4)` — evaluates every combination of categorical and numeric field, filters out near-unique ID columns and majority-zero numerics, and returns up to four ranked `ChartPairInfo` objects. Each object carries a pre-grouped `Dictionary<string, double>` and an `AggregationLabel` (`"Total"` or `"Promedio"`).
+- `DataProcessor.AutoDetectLineSeries(items)` — collects numeric fields (Temperatura, FPS, Price, Sales) into `Dictionary<string, List<double>>` series for the line chart.
+
+The four charts are rendered via `System.Windows.Forms.DataVisualization.Charting`:
+
+| Chart | Type | Limit | Notes |
+|-------|------|-------|-------|
+| Bar | `SeriesChartType.Column` | 15 categories | Extra categories aggregated into "Otros" by `LimitTopN` |
+| Pie | `SeriesChartType.Pie` | 10 slices | Legend docked right; labels shown when ≤ 6 slices |
+| Doughnut | `SeriesChartType.Doughnut` | 10 slices | `DoughnutRadius = 40`; legend docked right |
+| Line | `SeriesChartType.Line` | 50 points × 4 series | Series sampled uniformly by `DataProcessor.SampleSeries` |
+
+## Console / ASCII Charts
+
+The **Consola** button (`btnConsole_Click`) passes `_allItems` to `ConsoleVisualizer.RenderDynamicTable`, which auto-discovers columns with `DataProcessor.DiscoverFields`, computes per-column widths (capped at 30 characters), and renders a Unicode box-drawing table with right-aligned numeric columns.
+
+The **Gráfica Consola** button (`btnChartConsole_Click`) renders two complementary ASCII views using the best available data pair:
+
+- `ConsoleVisualizer.RenderBarChart` — horizontal block-character bars (`█`) scaled to the maximum value, with a labelled axis.
+- `ConsoleVisualizer.RenderPieAscii` — percentage bars with proportional fill and totals.
+- `ConsoleVisualizer.RenderSparkLines` — compact sparklines using Unicode block characters `▁▂▃▄▅▆▇█`, with min/max/avg summary per series.
+- `ConsoleVisualizer.RenderVerticalLineChart` — full ASCII grid with labelled Y-axis and dot-plot points.
+
+All output is written to the `rtbConsole` RichTextBox and the Console tab is brought forward automatically.
+
+## Exporting Data
+
+After data has been imported, five export buttons write the full `_allItems` list to a file chosen via `SaveFileDialog`. After a successful export the app calls `OfrecerEnviarPorCorreo`, which prompts the user to send the file by email via `FormCorreoEnvio`.
+
+| Button | Format | Implementation |
+|--------|--------|---------------|
+| `btnExportFileJson` | JSON | `System.Text.Json.JsonSerializer` with `WriteIndented = true` |
+| `btnExportFileTxt` | Pipe-delimited TXT | Pipe-joined columns, one row per line |
+| `btnExportFileXml` | XML | `System.Xml.XmlDocument`; element names sanitized by `SanitizeXmlName` |
+| `btnExportFileXlsx` | Excel (`.xlsx`) | `DocumentFormat.OpenXml` `SpreadsheetDocument` |
+| `btnExportFileCsv` | CSV | Comma-separated; values quoted when they contain commas, quotes, or newlines |
+
+All formats share the same column-discovery logic (`DiscoverAllColumns`): fixed columns `Id`, `Fuente`, `Etiqueta` appear first, followed by any additional populated properties in first-seen order.
+
+## Row Color Coding
+
+Rows in the data grid are color-coded by their origin so mixed-source datasets remain scannable at a glance:
+
+| Source | Color |
+|--------|-------|
+| CSV | Light blue — `RGB(220, 235, 255)` |
+| JSON | Light orange — `RGB(255, 235, 210)` |
+| XML | Light green — `RGB(215, 245, 215)` |
+| TXT | Light purple — `RGB(240, 220, 255)` |
+| DB | Light yellow — `RGB(255, 250, 210)` |
+| XLSX | Green — `RGB(198, 239, 206)` |
+| DOCX | Blue — `RGB(189, 215, 238)` |
+
+Columns whose names match currency keywords (`price`, `cost`, `sales`, `monto`, `importe`, etc.) are automatically right-aligned and formatted as `$#,##0.00`.
+
+<Note>
+  All imported data is held entirely in memory inside `_allItems`. The collection is cleared — and the ID index reset — when the application closes or when the user clicks **btnClearData** and confirms the prompt. There is no automatic persistence between sessions.
+</Note>

@@ -1,0 +1,56 @@
+---
+title: "Explorador de Archivos: All-in-One Windows File Manager"
+sidebarTitle: "Introduction"
+description: "Explorador de Archivos is a .NET 8 WinForms app that combines a file explorer, media player, photo editor, recorder, and data analysis suite in one window."
+---
+
+Explorador de Archivos is a Windows desktop application written in C# on .NET 8 WinForms. Where a standard file explorer lets you browse folders and open files with third-party programs, Explorador de Archivos handles everything inside a single window — audio playback, video playback, photo editing, screen/audio recording, multi-format document editing, and a full data analysis suite are all built in. Every feature launches as a child form directly from the main explorer grid, so you never leave the application to get work done.
+
+## What's Included
+
+<CardGroup cols={2}>
+  <Card title="File Explorer" icon="folder-open" href="/features/file-explorer">
+    Browse drives, folders, and files with a two-panel grid view and a Quick Access sidebar. Navigate by typing a path, using the Back button, or double-clicking any entry.
+  </Card>
+  <Card title="Audio Player" icon="music" href="/features/media-player">
+    Full-featured MP3/WAV/AAC player powered by NAudio, with playlist management, tag editing via TagLibSharp, and Spotify album-art and Genius lyrics integration.
+  </Card>
+  <Card title="Video Player" icon="video" href="/features/media-player">
+    Plays MP4, AVI, MKV, and MOV files using LibVLCSharp embedded directly inside a WinForms panel, with transport controls and full-screen support.
+  </Card>
+  <Card title="Photo Editor" icon="image" href="/features/photo-editor">
+    Opens JPG, PNG, and GIF files for in-app editing powered by AForge. Reads and displays EXIF/GPS metadata via MetadataExtractor.
+  </Card>
+  <Card title="Recorder" icon="circle-dot" href="/features/recorder">
+    Records audio from any microphone using NAudio and captures webcam video through AForge.Video.DirectShow, muxing the streams with FFMpegCore and SharpAvi.
+  </Card>
+  <Card title="Data Fusion Arena" icon="chart-bar" href="/features/data-fusion">
+    Import CSV files with CsvHelper, apply dynamic LINQ queries, and generate charts with System.Windows.Forms.DataVisualization — no external BI tool required.
+  </Card>
+  <Card title="Data Cleaner" icon="broom" href="/features/data-fusion">
+    Validate and clean tabular data using FluentValidation rules, then export corrected records back to CSV or Excel via DocumentFormat.OpenXml.
+  </Card>
+  <Card title="File Editor" icon="file-pen" href="/features/file-editor">
+    Edit plain-text, CSV, XML, JSON, Excel, and Word documents in one unified editor. Connects to PostgreSQL, MariaDB, and SQL Server for database-backed workflows.
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+Explorador de Archivos relies on a curated set of NuGet packages that cover every built-in module:
+
+- **NAudio 2.3** — audio capture, playback, and WAV encoding
+- **LibVLCSharp.WinForms 3.9 / VideoLAN.LibVLC.Windows 3.0** — hardware-accelerated video playback
+- **TagLibSharp 2.3** — reading and writing ID3/MP3 tags and album art
+- **AForge.Video / AForge.Video.DirectShow 2.2** — webcam and screen capture
+- **FFMpegCore 5.4** — audio-video muxing and transcoding via the ffmpeg binary
+- **CsvHelper 33.1** — high-performance CSV parsing and writing
+- **DocumentFormat.OpenXml 3.5** — reading and writing Excel (.xlsx) and Word (.docx) files
+- **Npgsql 10.0** — PostgreSQL connectivity
+- **MySqlConnector 2.5** — MariaDB / MySQL connectivity
+- **Microsoft.Data.SqlClient 7.0** — SQL Server connectivity
+- **SpotifyAPI.Web 7.4** — fetching album art from the Spotify Web API
+- **Genius.NET 4.0 / GeniusLyricsAPI 1.0** — song lyrics lookup
+- **MailKit 4.16** — sending emails with attachments directly from the app
+- **MetadataExtractor 2.8** — reading EXIF, GPS, and camera metadata from images
+- **FluentValidation 12.1** — rule-based data validation in the Data Cleaner

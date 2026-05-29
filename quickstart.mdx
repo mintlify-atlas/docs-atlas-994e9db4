@@ -1,47 +1,73 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Explorador de Archivos"
+sidebarTitle: "Quickstart"
+description: "Open Explorador de Archivos, navigate your file system, and play your first audio or video file in under five minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+By the end of this page you will have launched Explorador de Archivos, browsed your file system using Quick Access shortcuts, opened an audio and a video file in the built-in players, taken a first look at the Data Fusion Arena, and recorded a clip with the built-in recorder — all without leaving the application.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Launch the app">
+    Run the compiled executable (`ExploradorDeArchivos.exe`). The application opens directly to your **Documents** folder (`Environment.SpecialFolder.MyDocuments`). The main grid immediately lists all subfolders and files with their name, type, size, and last-modified date.
 
-    ```bash
-    npm install your-package
+    ```
+    ExploradorDeArchivos\bin\x64\Release\net8.0-windows\ExploradorDeArchivos.exe
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Navigate your file system">
+    Use the **Quick Access** sidebar on the left to jump to common folders in one click:
 
-    ```bash
-    your-cli init
-    ```
+    | Shortcut | Target |
+    |---|---|
+    | Documentos | My Documents |
+    | Descargas | User Profile → Downloads |
+    | Imágenes | My Pictures |
+    | Música | My Music |
+    | Vídeos | My Videos |
+    | Escritorio | Desktop |
+    | Este equipo | All drives (C:\, D:\, …) |
+
+    You can also type any absolute path directly into the path bar at the top and press **Enter** to navigate there instantly. Click **Back** to return to the previous folder, or double-click any folder row in the grid to descend into it.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Open a media file">
+    Double-click any media file in the grid to launch its dedicated player:
 
-    ```bash
-    your-cli start
-    ```
+    - **Audio** (`.mp3`, `.wav`, `.aac`) — opens the built-in audio player (`FormMP3`), powered by NAudio. The file is added to the playlist and starts playing immediately. Selecting additional audio files while the player is open queues them automatically.
+    - **Video** (`.mp4`, `.avi`, `.mkv`, `.mov`) — opens the video player (`FormMP4`) with a LibVLC surface embedded inside a WinForms panel.
+    - **Image** (`.jpg`, `.png`, `.gif`) — opens the photo editor (`FormEditarFotos`). The image loads automatically and EXIF/GPS metadata is read via MetadataExtractor.
+
+    All three players open as separate child windows and can run simultaneously alongside the main explorer.
+  </Step>
+  <Step title="Explore your data with Data Fusion Arena">
+    Click the **Data Fusion** button in the main toolbar to open the Data Fusion Arena (`FormDataBase`). From there:
+
+    1. Import a CSV file — CsvHelper parses it into an in-memory grid.
+    2. Optionally apply a dynamic LINQ filter in the query box to slice the data.
+    3. Click **Generar Gráfica** to produce automatic bar, line, or pie charts using `System.Windows.Forms.DataVisualization`.
+    4. Use the **Data Cleaner** tab to run FluentValidation rules and export a corrected file to CSV or Excel via DocumentFormat.OpenXml.
+  </Step>
+  <Step title="Record audio">
+    Click the **Grabadora** button in the main toolbar to open the recorder (`FormGrabadora`). Press **Record** to begin capturing audio from the default microphone via NAudio. If a webcam is detected through AForge.Video.DirectShow, video frames are captured in parallel and muxed with the audio by FFMpegCore into an output file in your working directory. Press **Stop** to finish and save the recording.
   </Step>
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  If you want to analyse a file straight away, navigate to it in the explorer and then open the [Data Fusion Arena](/features/data-fusion). You can import the file directly from the grid without copying it elsewhere first.
 </Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="File Explorer" icon="folder-open" href="/features/file-explorer">
+    Learn about the two-panel grid layout, Quick Access customisation, drive enumeration, and file-type icons.
+  </Card>
+  <Card title="Media Player" icon="circle-play" href="/features/media-player">
+    Deep dive into the audio player's playlist management, tag editing, Spotify album art, and Genius lyrics integration.
+  </Card>
+  <Card title="Data Fusion Arena" icon="chart-bar" href="/features/data-fusion">
+    Explore CSV import, dynamic LINQ queries, automatic charting, and Data Cleaner validation rules.
+  </Card>
+  <Card title="Configuration Reference" icon="gear" href="/reference/configuration">
+    Reference guide for hardcoded paths, ffmpeg setup, database connection strings, and API key configuration.
+  </Card>
+</CardGroup>

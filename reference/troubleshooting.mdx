@@ -1,0 +1,149 @@
+---
+title: "Troubleshoot Common Issues in Explorador de Archivos"
+sidebarTitle: "Troubleshooting"
+description: "Solutions for the most common problems: missing icons, VLC not found, FFMpeg errors, API credential failures, and database connection issues."
+---
+
+This page covers the most common issues encountered when running or building Explorador de Archivos, with direct causes and fixes derived from the source code. Each accordion below describes a specific symptom, explains its root cause, and gives the steps to resolve it.
+
+<Accordion title="Icons don't appear in the file grid">
+  **Cause**
+
+  `LoadCustomIcons()` in `Form1.cs` calls `AddImage` with six absolute paths that are hardcoded to the original developer's machine (`C:\Users\josel\Downloads\...`). If those files do not exist on the current machine, `File.Exists` returns `false`, `AddImage` returns `-1`, and the icon index variable (`idxVideo`, `idxMusic`, etc.) is set to `-1`. The grid then renders an empty cell instead of an icon for that file type.
+
+  **Fix**
+
+  1. Download replacement icon PNGs for each file type (video, music, text, folder, image, and other).
+  2. Open `Form1.cs` and update each path inside `LoadCustomIcons()` to match where you saved the images:
+
+  ```csharp
+  private void LoadCustomIcons()
+  {
+      idxVideo  = AddImage(@"C:\Icons\video.png");
+      idxMusic  = AddImage(@"C:\Icons\music.png");
+      idxText   = AddImage(@"C:\Icons\file.png");
+      idxFolder = AddImage(@"C:\Icons\folder.png");
+      idxOther  = AddImage(@"C:\Icons\unknown.png");
+      idxImage  = AddImage(@"C:\Icons\image.png");
+  }
+  ```
+
+  3. Rebuild the project. To diagnose which paths are failing at runtime, add a `Debug.WriteLine` call inside `AddImage` when `File.Exists` returns `false`.
+</Accordion>
+
+<Accordion title="Video player shows a black screen or VLC error">
+  **Cause**
+
+  `FormMP4` uses LibVLCSharp, which calls `Core.Initialize()` to locate the native VLC libraries. If VLC is not installed on the system — or the native binaries cannot be found — `Core.Initialize()` throws an exception and the video surface never renders, resulting in a black window or an unhandled error on startup.
+
+  **Fix**
+
+  1. Install VLC from [videolan.org](https://www.videolan.org/vlc/). The installer places the native libraries in the standard program files location where LibVLCSharp can discover them automatically.
+  2. Ensure the `VideoLAN.LibVLC.Windows` NuGet package is referenced in the project. This package bundles the necessary native DLLs and copies them to the output directory on build.
+  3. If you are running a 64-bit build, verify that the installed VLC is also 64-bit; architecture mismatches prevent the libraries from loading.
+</Accordion>
+
+<Accordion title="Recorder fails — FFMpeg not found">
+  **Cause**
+
+  `FormGrabadora` expects the FFMpeg executable to be present at the relative path `ffmpeg\bin\ffmpeg.exe` from the application's directory. If that file does not exist, `FFMpegCore` cannot mux the separately recorded audio and video streams into the final output file, and the recorder will throw a `FileNotFoundException` or produce a corrupt output.
+
+  **Fix**
+
+  1. Download the FFMpeg binary from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) (choose the Windows build).
+  2. Extract and place `ffmpeg.exe` at the following location relative to the application's executable:
+
+  ```
+  <AppDir>\ffmpeg\bin\ffmpeg.exe
+  ```
+
+  3. If you prefer a different location, update the `_ffmpegPath` constant in `FormGrabadora.cs` and rebuild.
+</Accordion>
+
+<Accordion title="Lyrics and album art don't load">
+  **Cause**
+
+  `FormMP3` initializes `MusicMetadataFetcher` with three API credentials that are hardcoded as local constants in the constructor:
+
+  ```csharp
+  const string geniusToken         = "IOSnEinv18eVvuJXfneYTML287cEol2kggWCOlBtqUdlznnCBzacDghWCdhSrY7L";
+  const string spotifyClientId     = "0ea2be936ec7419abbb440b806b34aa9";
+  const string spotifyClientSecret = "8c0371ae2ff849a28da6c25935dcc62e";
+  ```
+
+  If these credentials have been revoked, rate-limited, or replaced, API calls will fail and the lyrics panel and album art picture box will remain empty. The failure is silent — the player continues to function without metadata.
+
+  **Fix**
+
+  1. Create a free Genius API client at [genius.com/api-clients](https://genius.com/api-clients) and copy the **Client Access Token**.
+  2. Create a Spotify application at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and copy the **Client ID** and **Client Secret**.
+  3. Replace the three constants in the `FormMP3` constructor with your new values and rebuild.
+</Accordion>
+
+<Accordion title="Database import fails with a connection error">
+  **Cause**
+
+  `FormDataBase` connects to SQL Server, MariaDB/MySQL, or PostgreSQL using connection strings entered by the user. A failed import usually means one of the following:
+
+  - The server address or port is incorrect.
+  - The database server is not running or is not accepting remote connections.
+  - A firewall is blocking the port.
+  - The credentials (username or password) are wrong.
+
+  **Fix**
+
+  1. Verify the server address, port, and credentials. Default ports are:
+     - SQL Server: `1433` (via `Microsoft.Data.SqlClient`)
+     - MariaDB / MySQL: `3306` (via `MySqlConnector`)
+     - PostgreSQL: `5432` (via `Npgsql`)
+  2. Confirm the database server allows connections from the current machine's IP address.
+  3. Test connectivity with a dedicated database client (e.g., SSMS, DBeaver, or `psql`) before attempting an import inside the application.
+  4. For SQL Server, ensure that **SQL Server Browser** is running and that **TCP/IP** is enabled in SQL Server Configuration Manager.
+</Accordion>
+
+<Accordion title="Playlist doesn't restore on launch">
+  **Cause**
+
+  On startup, `FormMP3` calls `CargarEstado()`, which reads `%AppData%\MiReproductor\playlist.json` and attempts to deserialize a `Reproduccion` object. If the file is missing, cannot be parsed, or contains `Ruta` values that point to files that no longer exist on disk, the affected tracks are silently skipped and the playlist appears empty or incomplete.
+
+  **Fix**
+
+  1. Navigate to `%AppData%\MiReproductor\` in File Explorer and check whether `playlist.json` exists.
+  2. Open the file in a text editor and verify that each `Ruta` value points to an audio file that is still present on disk.
+  3. If the JSON is malformed (e.g., due to an interrupted write), delete `playlist.json` and restart the application. The player will start with an empty playlist and create a fresh file when it next closes.
+  4. If audio files have been moved, update the `Ruta` values in the JSON to their new locations, or re-add the files through the player's interface.
+</Accordion>
+
+<Accordion title="Email sending fails">
+  **Cause**
+
+  `FormCorreoEnvio` sends email via MailKit using SMTP settings provided by the user at runtime. Common causes for failure include:
+
+  - Incorrect SMTP host name or port number.
+  - Wrong password, or the password has been changed since it was last entered.
+  - For Gmail accounts with two-factor authentication enabled, the account password cannot be used directly; an App Password is required.
+  - The email provider blocking the connection as a security measure.
+
+  **Fix**
+
+  1. Verify the SMTP host and port in `FormCorreoEnvio`. Common values:
+     - Gmail: host `smtp.gmail.com`, port `587` (STARTTLS) or `465` (SSL)
+     - Outlook / Hotmail: host `smtp.office365.com`, port `587`
+  2. Confirm the sender address and password are correct.
+  3. If using Gmail with two-factor authentication, generate a 16-character App Password at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) and use that in place of your regular account password.
+  4. Check that your antivirus or firewall is not blocking outbound connections on the SMTP port.
+</Accordion>
+
+<Accordion title="App crashes on startup with PlatformNotSupportedException">
+  **Cause**
+
+  The project targets `net8.0-windows` with `<UseWindowsForms>true</UseWindowsForms>`. Windows Forms is a Windows-only framework. Attempting to run the application on Linux or macOS — including inside a Docker container or WSL — causes the runtime to throw `PlatformNotSupportedException` during WinForms initialization.
+
+  **Fix**
+
+  Run the application on **Windows 10** or **Windows 11** only. The .NET 8 runtime must be installed; download it from [dotnet.microsoft.com/download/dotnet/8.0](https://dotnet.microsoft.com/download/dotnet/8.0). There is no supported cross-platform path for this project as it relies on WinForms, LibVLCSharp, AForge DirectShow, and other Windows-specific APIs.
+</Accordion>
+
+<Note>
+  If you encounter an issue that is not covered here, open a bug report on the project's GitHub repository. Include the full exception message and stack trace from the Visual Studio Output window or the Windows Event Viewer to help diagnose the problem quickly.
+</Note>

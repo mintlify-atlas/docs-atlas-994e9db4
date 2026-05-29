@@ -1,0 +1,64 @@
+---
+title: "Edit Documents and Spreadsheets in the File Editor"
+sidebarTitle: "File Editor"
+description: "Load and edit CSV, Excel, Word, PowerPoint, TXT, JSON, XML, and PDF files with a tabbed interface showing grid view or rich text depending on file type."
+---
+
+The **File Editor** (`FormEdit`) is the built-in document editor of Explorador de Archivos. It opens from the main toolbar and presents two views depending on the file type: a `DataGridView` for tabular formats (CSV and Excel) and a `RichTextBox` (`rtbContenido`) for text-based formats. PDF files are rendered in an embedded Microsoft **WebView2** control. The editor tracks the active file path in `_currentFile` and the detected format in `_currentFileType`, so the **Guardar** button always writes back using the same format that was loaded.
+
+## Supported Formats
+
+| Format | Extension | View Mode | Editable |
+|--------|-----------|-----------|----------|
+| CSV | `.csv` | Grid (`DataGridView`) | Yes |
+| Excel | `.xlsx` / `.xls` | Grid (`DataGridView`) | Yes (`.xlsx` only) |
+| Word | `.docx` / `.doc` | Rich Text (`RichTextBox`) | Yes (`.docx` only) |
+| PowerPoint | `.pptx` / `.ppt` | Rich Text (slide text extracted) | Read-only |
+| Plain Text | `.txt` | Rich Text (`RichTextBox`) | Yes |
+| JSON | `.json` | Rich Text with syntax highlighting | Yes |
+| XML | `.xml` | Rich Text with syntax highlighting | Yes |
+| PDF | `.pdf` | WebView2 browser render | Read-only |
+
+## Opening a File
+
+<Steps>
+  <Step title="Click Cargar">
+    The **Cargar** button (`btnCargar_Click`) opens an `OpenFileDialog` with a multi-format filter that lists every supported extension. The full path is stored in `_currentFile`.
+  </Step>
+  <Step title="Extension detection">
+    The app reads `Path.GetExtension(_currentFile).ToLower()` and branches to the matching private loader method. There is no content sniffing — the extension is authoritative.
+  </Step>
+  <Step title="Loading into the correct view">
+    - **CSV** (`CargarCSV`) — splits the first line on commas to create `DataGridView` columns, then adds one row per subsequent line.
+    - **Excel** (`CargarExcel`) — opens the `.xlsx` file with `DocumentFormat.OpenXml.Packaging.SpreadsheetDocument`; the first `Row` becomes column headers, remaining rows become data rows. Shared-string-table values are resolved via `GetCellValue`.
+    - **Word** (`CargarWord`) — extracts text from `word/document.xml` inside the `.docx` ZIP archive by reading all `w:t` nodes and concatenating their `InnerText`. The result is placed in `rtbContenido`.
+    - **PowerPoint** (`CargarPowerPoint`) — iterates `ppt/slides/slide*.xml` entries in sorted order, extracts `a:t` text nodes per slide, and formats them with a `--- Diapositiva N ---` heading.
+    - **TXT** (`CargarTexto`) — reads the entire file with `File.ReadAllText` (UTF-8) into `rtbContenido`. Font is set to Consolas 11 pt on a dark background (`RGB(30, 30, 30)`).
+    - **JSON** (`CargarJSON`) — reads the file as text and applies `AplicarColoreado_JSON` for syntax highlighting: braces/brackets in amber, strings in green, numbers in blue, `true`/`false`/`null` in orange.
+    - **XML** (`CargarXML`) — reads the file as text and applies `AplicarColoreado_XML`: tags in steel blue, attribute names in light blue, attribute values in brownish orange, comments in green.
+    - **PDF** (`CargarPDF`) — hides `rtbContenido`, shows the `WebView2` control, awaits `EnsureCoreWebView2Async`, and navigates to the file using an absolute `file://` URI.
+  </Step>
+</Steps>
+
+## Editing
+
+For grid-based formats (CSV and Excel), the `DataGridView` is configured with `AllowUserToAddRows = true`, `AllowUserToDeleteRows = true`, and `ReadOnly = false`. Users can click any cell to edit in place, press **Delete** on a selected row to remove it, or use the blank bottom row to append new records.
+
+For text-based formats (TXT, JSON, XML, and Word), `rtbContenido` is fully writable. The JSON and XML syntax highlighting is applied once on load; it is not re-evaluated while typing. For Word documents, the text is extracted as plain paragraphs — inline formatting such as bold or tables is not preserved in the editor view.
+
+## Saving
+
+Clicking **Guardar** (`btnGuardar_Click`) dispatches to the format-specific writer:
+
+- **CSV** (`GuardarCSV`) — iterates `DataGridView` columns for the header row, then iterates rows; each cell value is double-quoted, with internal quotes escaped as `""`. The file is overwritten with `File.WriteAllText` (UTF-8).
+- **Excel** (`GuardarExcel`) — copies the original file to a `.backup` sidecar and a temp file, opens the temp file with `SpreadsheetDocument.Open(…, isEditable: true)`, clears all rows from the active `SheetData`, writes the header row and all data rows as `CellValues.String` cells with explicit `CellReference` addresses (`A1`, `B1`, …), saves, then atomically replaces the original. The backup is deleted on success or restored on failure.
+- **Word** (`GuardarWord`) — copies the original to a `.backup` and a temp file, opens the temp file as a `ZipArchive`, reads `word/document.xml`, removes all existing `w:t` nodes, creates a new `w:p`→`w:r`→`w:t` paragraph for each line in `rtbContenido`, replaces the ZIP entry, then atomically replaces the original.
+- **TXT / JSON / XML** (`GuardarTexto`) — calls `File.WriteAllText(_currentFile, rtbContenido.Text, Encoding.UTF8)`.
+
+<Note>
+  PDF editing is not supported. Clicking **Guardar** while a PDF is loaded displays an informational message and takes no action. PDFs are rendered read-only via the embedded Microsoft WebView2 control.
+</Note>
+
+<Note>
+  PowerPoint editing is not supported. Only the plain text content of each slide is extracted for review. Clicking **Guardar** while a PowerPoint is loaded displays a message directing you to Microsoft PowerPoint for editing.
+</Note>

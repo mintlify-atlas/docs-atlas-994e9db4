@@ -1,0 +1,128 @@
+---
+title: "Stream and Control Video Files with the Video Player"
+sidebarTitle: "Video Player"
+description: "LibVLC-powered video player for MP4, AVI, MKV, MOV, and more — with seek, volume, mute, repeat modes, and forward/back skip controls."
+---
+
+The video player (`FormMP4`) delivers smooth, hardware-accelerated video playback inside a dedicated floating window, powered by **LibVLCSharp.WinForms** and the **VideoLAN.LibVLC.Windows** NuGet package. It opens automatically the moment you double-click a video file in the file explorer, requiring zero configuration. The player initialises a `LibVLC` core, attaches a `MediaPlayer` to an embedded `VideoView` control, and is ready to stream within milliseconds of the window loading.
+
+## Supported Formats
+
+File-type detection in the explorer uses the `IsVideo` extension check to decide whether to route a double-click to `FormMP4`:
+
+```csharp
+private bool IsVideo(string ext) => ext is "mp4" or "avi" or "mkv" or "mov";
+```
+
+| Format | Extension |
+|--------|-----------|
+| MPEG-4 | `.mp4` |
+| Audio Video Interleave | `.avi` |
+| Matroska | `.mkv` |
+| QuickTime Movie | `.mov` |
+
+The open-file dialog inside the player itself accepts an extended set of containers — `mp4`, `avi`, `mkv`, `mov`, `wmv`, `flv`, `webm`, and `m4v` — because the underlying LibVLC engine supports far more formats than the explorer's quick-launch shortcuts cover.
+
+## Opening a Video
+
+<Steps>
+  <Step title="Double-click from the File Explorer">
+    When `Form1` detects a video-extension double-click in `dataGridView1`, it calls `AbrirReproductor(path)`. If `_formMP4` is `null` or has been disposed, a fresh `FormMP4` instance is created, shown, and stored. The explorer then calls `_formMP4.CargarYReproducir(path)` and brings the window to the front with `BringToFront()`.
+  </Step>
+  <Step title="Open File button inside the player">
+    Click the open-file button (`PicAbrir`) inside `FormMP4`. This opens an `OpenFileDialog` with the filter `Video Files|*.mp4;*.avi;*.mkv;*.mov;*.wmv;*.flv;*.webm;*.m4v`. Selecting a file calls `CargarVideoAsync(path)` directly.
+  </Step>
+</Steps>
+
+`CargarYReproducir(path)` checks the `_isInitialized` flag before proceeding. If VLC has not yet finished initialising (which can happen on very fast double-clicks), it waits 500 ms on a background task then retries, ensuring the video is never silently dropped.
+
+## Playback Controls
+
+All transport actions target the shared `_mediaPlayer` (`LibVLCSharp.Shared.MediaPlayer`) instance:
+
+| Control | Element | Action |
+|---------|---------|--------|
+| Play / Pause | `PicPlayPause` | Toggles `_mediaPlayer.IsPlaying`. Button image swaps between a play and pause icon accordingly. |
+| Stop | `PicStop` | Calls `_mediaPlayer.Stop()`, resets `trkProgreso` to 0, and clears both time labels. |
+| Skip forward +5 s | `PicAdelante` | Passes `_mediaPlayer.Time + 5000` (milliseconds) to `RealizarSeekAsync`. |
+| Rewind −5 s | `PicAtras` | Passes `Math.Max(0, _mediaPlayer.Time - 5000)` to `RealizarSeekAsync`, clamping at zero. |
+| Volume | `trkVolumen` | Range 0–100. Scroll event sets `_mediaPlayer.Volume = trkVolumen.Value` directly. Initialised to 100 on load. |
+| Mute toggle | `PicMute` | Flips `_mediaPlayer.Mute`. The button background turns red (`Color.FromArgb(200, 50, 50)`) when muted and returns to black when unmuted. |
+
+## Progress Bar
+
+The seek bar (`trkProgreso`) maps the full media duration to `TRACKBAR_MAX = 10000` discrete steps, giving sub-second precision even for multi-hour files:
+
+```csharp
+private const int TRACKBAR_MAX = 10000;
+
+// Position → TrackBar value
+int nuevoValor = (int)((tiempoActual / (double)duracion) * TRACKBAR_MAX);
+
+// TrackBar value → seek position
+long nuevoTiempo = (long)((trkProgreso.Value / (double)TRACKBAR_MAX) * duracion);
+```
+
+Seeking is **debounced** to prevent glitches when the user drags the slider rapidly. `RealizarSeekAsync` records the current wall-clock time in `_lastSeekTime` and silently drops any seek request that arrives within `SEEK_DEBOUNCE_MS = 100` milliseconds of the previous one:
+
+```csharp
+private const long SEEK_DEBOUNCE_MS = 100;
+
+long ahora = DateTime.UtcNow.Ticks / 10000; // ticks → ms
+if (ahora - _lastSeekTime < SEEK_DEBOUNCE_MS)
+    return;
+```
+
+The actual seek is executed on a `Task.Run` background thread to avoid blocking the UI. Progress-bar updates come from two sources that cooperate via an `_isSeeking` guard flag:
+
+- **`TimerProgreso_Tick`** — a 100 ms `System.Windows.Forms.Timer` that polls `_mediaPlayer.Time` and `_mediaPlayer.Length` regularly.
+- **`MediaPlayer_TimeChanged`** — a LibVLC event fired whenever the playback position changes, providing finer-grained updates between timer ticks.
+
+Both sources use `InvokeRequired` / `Invoke` to marshal updates safely onto the UI thread.
+
+## Repeat Modes
+
+Clicking `PicRepeat` cycles through three repeat modes tracked by the `_repeatMode` integer field. The background colour of the repeat button changes to provide a clear visual indicator of the active mode:
+
+| Mode | Value | Behaviour | Button colour |
+|------|-------|-----------|---------------|
+| No repeat | `0` | Stops at the end of the video | `Color.Black` (`Transparent`) |
+| Loop single | `1` | Restarts the same file (`ReiniciarVideoAsync`) | Pink — `Color.FromArgb(255, 100, 200)` |
+| Loop continuously | `2` | Restarts the same file repeatedly | Cyan — `Color.FromArgb(100, 200, 255)` |
+
+Mode transitions are managed by:
+
+```csharp
+private void PicRepeat_Click(object sender, EventArgs e)
+{
+    _repeatMode = (_repeatMode + 1) % 3;
+    ActualizarVisualsRepeat();
+}
+```
+
+When `_mediaPlayer` fires the `EndReached` event, `GestionarFinVideo()` is invoked on the UI thread and dispatches to `_mediaPlayer.Stop()` (mode 0) or `ReiniciarVideoAsync()` (modes 1 and 2).
+
+## Auto-play from Explorer
+
+`Form1` manages `FormMP4` as a singleton. The full auto-play flow when you double-click a video file is:
+
+```csharp
+// Inside Form1.AbrirReproductor(string rutaArchivo)
+if (_formMP4 == null || _formMP4.IsDisposed)
+{
+    _formMP4 = new FormMP4();
+    _formMP4.FormClosed += (s, e) => _formMP4 = null;
+    _formMP4.Show();
+}
+
+_formMP4.CargarYReproducir(rutaArchivo);
+_formMP4.BringToFront();
+```
+
+Because `_formMP4` is nulled out in the `FormClosed` handler, closing and re-opening the player window always creates a clean instance with a freshly initialised LibVLC context.
+
+When the main `Form1` window closes, it explicitly calls `_formMP4.Close()` to ensure the `OnClosed` override in `FormMP4` runs — which stops the timer, disposes the `MediaPlayer`, the `LibVLC` instance, and the `VideoView` control — preventing any native VLC threads from outliving the application.
+
+<Note>
+  LibVLC is bundled automatically via the **VideoLAN.LibVLC.Windows** NuGet package, which copies the native VLC libraries alongside the application executable at build time. You do **not** need a separate VLC installation on the target machine; everything required is included in the application's output folder.
+</Note>

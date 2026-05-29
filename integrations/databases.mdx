@@ -1,0 +1,108 @@
+---
+title: "Connect to SQL Server, MariaDB, and PostgreSQL Databases"
+sidebarTitle: "Databases"
+description: "Import or export data between Explorador de Archivos and SQL Server, MariaDB, and PostgreSQL databases using the built-in Data Fusion Arena connectors."
+---
+
+The Data Fusion Arena connects to live relational databases so you can pull records directly into the analysis grid or push your integrated dataset to a persistent store. All three supported engines use a unified workflow backed by **Microsoft.Data.SqlClient** (SQL Server), **MySqlConnector** (MariaDB), and **Npgsql** (PostgreSQL) — each supporting both import and export with no additional setup beyond your connection credentials.
+
+## Supported Databases
+
+| Database | Driver | Default Port |
+|---|---|---|
+| SQL Server | Microsoft.Data.SqlClient | 1433 |
+| MariaDB | MySqlConnector | 3306 |
+| PostgreSQL | Npgsql | 5432 |
+
+## Importing from a Database
+
+<Steps>
+  <Step title="Open the Data Fusion Arena">
+    Click the **Data Fusion Arena** button in the main toolbar to open the data management panel.
+  </Step>
+  <Step title="Click the import button for your database">
+    Choose **Import from SQL Server**, **Import from MariaDB**, or **Import from PostgreSQL** from the database section of the toolbar.
+  </Step>
+  <Step title="Enter connection details">
+    The `ShowImportDialog` dialog opens. Fill in:
+    - **Server** — hostname or IP address (default: `localhost`)
+    - **Port** — pre-filled with the default for your engine
+    - **Database** — name of the target database (default: `DataFusionArena`)
+    - **Username** and **Password**
+    - **Windows Authentication** checkbox (SQL Server only)
+
+    Click **List Tables** to verify the connection and populate the table dropdown.
+  </Step>
+  <Step title="Select a table">
+    The dropdown is populated by `GetTablesSqlServer`, `GetTablesMariaDb`, or `GetTablesPostgreSql` depending on the engine. Select the table you want to import.
+  </Step>
+  <Step title="Click Import">
+    The selected table is read by `DataReader.ReadFromSqlServer`, `DataReader.ReadFromMariaDb`, or `DataReader.ReadFromPostgreSql` and returned as `List<DataItem>`. Rows appear in the Arena grid immediately.
+  </Step>
+</Steps>
+
+## Exporting to a Database
+
+<Steps>
+  <Step title="Load data in the Arena">
+    Import or generate data within the Data Fusion Arena so the grid is populated.
+  </Step>
+  <Step title="Click the export button for your target database">
+    Choose **Export to SQL Server**, **Export to MariaDB**, or **Export to PostgreSQL**.
+  </Step>
+  <Step title="Enter connection details">
+    The `ShowExportDialog` dialog opens. Fill in the server, port, database name, username, and password. You can also customise the **Table name** field (defaults to `DatosIntegrados`).
+  </Step>
+  <Step title="Click Export">
+    `DatabaseExporter.ExportToSqlServer`, `ExportToMariaDb`, or `ExportToPostgreSql` runs. The target database is created automatically if it does not exist. The table is dropped and recreated with columns discovered dynamically from the loaded data, then each row is inserted individually.
+  </Step>
+  <Step title="Confirm the result">
+    A dialog displays the number of rows successfully exported.
+  </Step>
+</Steps>
+
+## DataReader Methods
+
+The three database read methods share an identical signature. Each one first ensures the target database exists (`EnsureSqlServerDatabase` / `EnsureMySqlDatabase` / `EnsurePostgreSqlDatabase`), checks whether the requested table is present, and returns an empty list if it is not — so callers never need to handle missing-table exceptions.
+
+```csharp
+List<DataItem> DataReader.ReadFromSqlServer(
+    string connectionString,
+    string tableName = "DatosIntegrados")
+
+List<DataItem> DataReader.ReadFromMariaDb(
+    string connectionString,
+    string tableName = "DatosIntegrados")
+
+List<DataItem> DataReader.ReadFromPostgreSql(
+    string connectionString,
+    string tableName = "DatosIntegrados")
+```
+
+Columns are mapped back to `DataItem` properties by name (case-insensitive). Any column that does not match a known property is stored in `DataItem.ExtraFields` so no data is silently dropped.
+
+## DatabaseExporter Methods
+
+The three export methods discover the full set of columns at runtime by inspecting every `DataItem` in the list (including `ExtraFields`). Each column becomes a `VARCHAR(500)` / `NVARCHAR(500)` column in the target table. The return value is the number of rows inserted.
+
+```csharp
+// Returns: number of rows exported
+int DatabaseExporter.ExportToSqlServer(
+    List<DataItem> items,
+    string connectionString,
+    string tableName = "DatosIntegrados")
+
+int DatabaseExporter.ExportToMariaDb(
+    List<DataItem> items,
+    string connectionString,
+    string tableName = "DatosIntegrados")
+
+int DatabaseExporter.ExportToPostgreSql(
+    List<DataItem> items,
+    string connectionString,
+    string tableName = "DatosIntegrados")
+```
+
+<Warning>
+  Each export call drops and recreates the target table (`DROP TABLE IF EXISTS` / `IF OBJECT_ID … DROP TABLE`). Any existing data in a table named `DatosIntegrados` (or your custom table name) will be permanently deleted. Back up your data before exporting to an existing table.
+</Warning>

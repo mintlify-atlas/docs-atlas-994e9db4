@@ -1,0 +1,93 @@
+---
+title: "Validate and Clean Tabular Data with the Data Cleaner"
+sidebarTitle: "Data Cleaner"
+description: "Load CSV, JSON, XML, Excel, or Word files, infer column types, highlight type mismatches and validation errors, apply automatic cleaning, and export corrected data."
+---
+
+The **Data Cleaner** (`FormCorrector`) is a dedicated data-quality workbench that goes beyond raw import. It routes every file through a `DataPipeline` backed by FluentValidation-style row validation, then hands the surviving rows to a `ColumnTypeInferrer` that inspects every cell and flags values that disagree with their column's inferred type. Errors are highlighted directly in the `DataGridView` so you can review, manually correct, or bulk-clean the data before exporting.
+
+## Supported Input Formats
+
+The Data Cleaner accepts the same file types as the Data Fusion Arena, each served by a dedicated `IFileReader` implementation:
+
+| Format | Extension | Reader class |
+|--------|-----------|-------------|
+| CSV | `.csv` | `CsvFileReader` |
+| JSON | `.json` | `JsonFileReader` |
+| XML | `.xml` | `XmlFileReader` |
+| Excel | `.xlsx` | `ExcelFileReader` |
+| Word | `.docx` | `WordFileReader` |
+
+For files with ambiguous extensions (`.txt`, `.tsv`, and similar), `FormCorrector` peeks at the first 4 096 characters to detect JSON (`{`/`[`) or XML (`<`) content before falling back to delimiter-sniffed CSV. The legacy formats `.xls` and `.doc` are explicitly rejected with a descriptive error message.
+
+## Loading and Processing
+
+<Steps>
+  <Step title="Select a file">
+    Click the file-picker button (**BtnSeleccionar**). An `OpenFileDialog` scoped to the supported extensions opens; the chosen path is stored in `txtArchivo`.
+  </Step>
+  <Step title="Optionally enter a sort column">
+    Type a column name into the **Ordenar por** field (`txtOrdenarPor`). The value is passed directly to Dynamic LINQ as an `OrderBy` expression (e.g. `"Nombre ASC"` or `"Fecha DESC"`). Leave blank to skip ordering.
+  </Step>
+  <Step title="Click Procesar">
+    **BtnProcesar** calls `DataPipeline.Run(filePath, orderBy)` asynchronously via `Task.Run` so the UI remains responsive. The pipeline executes three atomic steps:
+
+    1. **Normalize** — trims whitespace from every string value.
+    2. **Validate** — `DynamicRowValidator` checks each row; invalid rows are separated into `InvalidRows` and their field-level error messages are added to `ErrorLog`.
+    3. **Order** — if an `orderByExpression` was provided, rows are converted to `ExpandoObject` for Dynamic LINQ ordering, then converted back to `IDictionary<string, object>`.
+  </Step>
+  <Step title="Review results">
+    Valid rows populate the `DataGridView`; each rejected row appears in `lstErrores` with a `⚠` prefix showing the field name and validation message. The `lblErrores` label summarises the count of rejected rows.
+  </Step>
+</Steps>
+
+## Type Inference
+
+After the pipeline finishes, `ColumnTypeInferrer.Infer(_validRows)` scans every non-empty cell in the dataset. For each column it counts how many values parse as a number (`double.TryParse`) or a date (`DateTime.TryParse` across 18+ format patterns and three culture locales). A column is declared **Numeric** or **Date** if at least 70 % of its non-empty values match that type; otherwise it stays **Text**.
+
+Column name semantics override the threshold: columns whose names contain words like `expediente`, `id`, `precio`, or `telefono` are always **Numeric**; names containing `fecha`, `date`, `nacimien`, or `vencim` are biased toward **Date**.
+
+The infer call returns an `InferenceResult` with two outputs:
+
+- `ColumnTypes` — a `Dictionary<string, ColumnDataType>` mapping each column to `Numeric`, `Date`, or `Text`.
+- `CellErrors` — a `List<CellError>` where each entry records the row index, column name, raw value, expected type, and one of three `CellErrorKind` values.
+
+Two error kinds are visually highlighted in the grid:
+
+| Highlight | Color | Kind | Meaning |
+|-----------|-------|------|---------|
+| 🟠 Orange | `RGB(255, 200, 100)` | `UnexpectedText` / `UnexpectedDate` | Text or non-date value in a Numeric or Date column |
+| 🔴 Red | `RGB(255, 160, 160)` | `UnexpectedNumeric` | A purely numeric value in a Text column |
+
+Cell lookups during `CellFormatting` are O(1) because all errors are pre-indexed into a `HashSet<(int rowIndex, string colName)>` called `_cellErrorIndex`. Hovering over an error cell shows a tooltip with the full error description and a prompt to use **Limpiar Datos**.
+
+The `lblTiposError` label summarises both counts:
+
+```
+⚠ 3 texto en col. numérica/fecha (🟠)  |  7 número en col. de texto (🔴)
+```
+
+## Filtering
+
+After processing, `BuildFilterControls` creates one **Label + ComboBox** pair per column inside the `pnlFiltros` panel. Each combo is pre-populated with the unique values found in that column (plus an `(Todos)` option at the top). Columns inferred as Numeric or Date have their type appended to the label in square brackets, e.g. `Precio [Numeric]`.
+
+Clicking **Aplicar filtros** evaluates all active combos as a logical AND: only rows where every filtered column matches its selected value are shown. **Limpiar filtros** resets all combos to `(Todos)` and restores the full grid.
+
+## Cleaning
+
+Clicking **Limpiar Datos** opens the `ColumnTypesForm` dialog, which shows the inferred `ColumnTypes` dictionary and lets you review or override the detected type for any column before committing. If you confirm, `DataCleaner.Clean(_validRows, typesToUse)` applies automatic corrections and returns a cleaned copy of the rows together with a human-readable `changeLog`.
+
+Corrected cells are stored in the `_cleanedCells` dictionary (`Dictionary<(int, string), string>` mapping `(rowIndex, columnName)` to the original value). During `CellFormatting`, cleaned cells take priority over error cells and are rendered in **green** (`RGB(180, 230, 180)`). Hovering shows the original value in a tooltip.
+
+After cleaning, `ColumnTypeInferrer.Infer` runs again on the updated rows and the error highlights are recalculated. A summary message reports how many cells were modified.
+
+## Saving and Exporting
+
+| Button | Action |
+|--------|--------|
+| **Guardar Correcciones** | Reads the current `DataGridView` back into `_validRows`, re-infers types, and refreshes error highlighting. No file is written — this synchronises the in-memory state with any manual edits made directly in the grid. |
+| **Exportar** | Opens a `SaveFileDialog` and delegates to `DataExporter.Export(_validRows, path)`, which writes the cleaned data in the format matching the chosen extension. |
+
+<Tip>
+  Use the **Ordenar por** field before clicking **Procesar** to pre-sort results by a meaningful column (e.g. `"Fecha ASC"` for date-ordered records or `"Precio DESC"` for highest-cost-first). Pre-sorting makes it much easier to spot out-of-range values and date anomalies during the type-error review step.
+</Tip>

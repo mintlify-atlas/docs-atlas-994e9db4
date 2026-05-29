@@ -1,0 +1,90 @@
+---
+title: "Configuration Reference for Explorador de Archivos"
+sidebarTitle: "Configuration"
+description: "All hardcoded paths, API keys, playlist state file location, FFMpeg binary path, recordings folder, and icon file paths that must be set before building."
+---
+
+Explorador de Archivos has no external configuration file — all settings are hardcoded constants in the source. Before building and distributing the application, update every path and credential listed on this page to match your own environment and accounts. Failing to do so will cause missing icons, broken API lookups, and recorder failures at runtime.
+
+## Icon Image Paths
+
+<Warning>
+  These paths are hardcoded in `Form1.cs` inside the `LoadCustomIcons()` method. They point to the original developer's `Downloads` folder and **will not exist on any other machine**. Update each path to a location that is valid on your system before building.
+</Warning>
+
+| Constant | Default Value | Purpose |
+|----------|--------------|---------|
+| Video icon | `C:\Users\josel\Downloads\video-player_10421039.png` | Icon displayed next to video files in the main grid |
+| Music icon | `C:\Users\josel\Downloads\music_2402461.png` | Icon displayed next to audio files |
+| Text icon | `C:\Users\josel\Downloads\file_2521903.png` | Icon displayed next to text and data files |
+| Folder icon | `C:\Users\josel\Downloads\shared-folder_5542294.png` | Icon displayed next to directories |
+| Other icon | `C:\Users\josel\Downloads\incognito_7921015.png` | Icon displayed for unrecognized file types |
+| Image icon | `C:\Users\josel\Downloads\image_icon.png` | Icon displayed next to image files |
+
+If `File.Exists` returns `false` for any of these paths, `AddImage` returns `-1` and the corresponding icon column in the grid will be empty for that file type.
+
+## Audio Player Paths
+
+The following paths are hardcoded in `FormMP3.cs` as field initializers and are read immediately when the form is constructed.
+
+| Constant | Default Value | Purpose |
+|----------|--------------|---------|
+| Default album art | `C:/Users/josel/Downloads/compact-disk.png` | Fallback image shown in `pictureBoxAlbum` when no album art can be fetched from Spotify |
+| Play button image | `C:/Users/josel/Downloads/play-button_5072289.png` | Image used for the play control button |
+| Pause button image | `C:/Users/josel/Downloads/pause.png` | Image used for the pause control button |
+
+## Playlist State File
+
+The audio player automatically saves its full playlist state — including track list, current index, and playback position — to the following file:
+
+```
+%AppData%\MiReproductor\playlist.json
+```
+
+The directory is created automatically on first run via `Directory.CreateDirectory`. The file is written on form close and read back on next launch inside `CargarEstado()`. If the file is missing or contains paths that no longer exist, those tracks are silently skipped.
+
+## Music API Credentials
+
+<Warning>
+  The credentials below are the **original developer's personal API keys**. They are committed directly in `FormMP3.cs` as local constants in the constructor. Replace them with credentials from your own Genius and Spotify API applications before distributing the application, and **never commit real secrets to a public repository**.
+</Warning>
+
+```csharp
+const string geniusToken         = "IOSnEinv18eVvuJXfneYTML287cEol2kggWCOlBtqUdlznnCBzacDghWCdhSrY7L";
+const string spotifyClientId     = "0ea2be936ec7419abbb440b806b34aa9";
+const string spotifyClientSecret = "8c0371ae2ff849a28da6c25935dcc62e";
+```
+
+These three values are passed directly to the `MusicMetadataFetcher` constructor. If any credential is invalid or revoked, lyrics and album art lookups will fail silently; the player will continue to function but without metadata enrichment.
+
+- **Genius token**: obtain at [genius.com/api-clients](https://genius.com/api-clients).
+- **Spotify credentials**: obtain at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard).
+
+## Recorder Configuration
+
+`FormGrabadora` uses the following constants for capture resolution, frame rate, and output location.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `VIDEO_WIDTH` | `1280` | Recording width in pixels |
+| `VIDEO_HEIGHT` | `720` | Recording height in pixels |
+| `VIDEO_FPS` | `30` | Frames per second for video capture |
+| `AUDIO_SAMPLE_RATE` | `44100` | Audio sample rate in Hz |
+| `_ffmpegPath` | `ffmpeg\bin\ffmpeg.exe` | Path to the FFMpeg executable, relative to the application directory |
+| `_recordingsFolder` | `%LocalAppData%\Grabaciones` | Directory where completed recordings are saved |
+
+The `_ffmpegPath` value is relative to the application's executable directory. You must place `ffmpeg.exe` at `<AppDir>\ffmpeg\bin\ffmpeg.exe` before the recorder can mux audio and video into a final output file. Download FFMpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html).
+
+## Email Settings
+
+`EmailSettings` persists the sender's email address as JSON at:
+
+```
+%AppData%\<AppVersion>\email_settings.json
+```
+
+The path is resolved at runtime via `Application.UserAppDataPath`. SMTP host, port, and password are entered by the user inside `FormCorreoEnvio` each session and are not stored on disk.
+
+<Tip>
+  Consider moving all hardcoded paths and API credentials to an `appsettings.json` file (loaded via `Microsoft.Extensions.Configuration`) or to the Windows Registry under a per-user key. Doing so allows you to ship a single build to multiple machines without modifying source code, and makes it straightforward to rotate API keys without a recompile.
+</Tip>

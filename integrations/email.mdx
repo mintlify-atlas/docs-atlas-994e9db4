@@ -1,0 +1,64 @@
+---
+title: "Send Exported Files by Email with MailKit"
+sidebarTitle: "Email"
+description: "After exporting data from the Data Fusion Arena, Explorador de Archivos can attach the file and send it via SMTP using MailKit and your configured email account."
+---
+
+After any successful file export from the Data Fusion Arena — whether the output is JSON, TXT, XML, XLSX, or CSV — the application offers to send the file by email. This opens `FormCorreoEnvio`, which uses **MailKit** and **MimeKit** to connect to an SMTP server, authenticate, attach the exported file, and deliver the message asynchronously without blocking the UI.
+
+## How It Works
+
+1. After a successful export, `FormDataBase` calls `OfrecerEnviarPorCorreo(rutaArchivo)` with the path returned by the `SaveFileDialog`.
+2. A `MessageBox.Show` prompt asks the user whether to send the file, displaying the filename in the message text.
+3. If the user clicks **Yes**, `new FormCorreoEnvio(rutaArchivo).ShowDialog()` opens the send dialog with the attachment path already set.
+4. The dialog pre-fills the **Subject** field as `"Archivo exportado: {filename}"` and provides a default message body. The user only needs to enter the recipient address.
+5. On clicking **Send**, MailKit's `SmtpClient` connects to the configured SMTP host using `SecureSocketOptions.StartTls`, authenticates with the sender credentials, attaches the file via `BodyBuilder.Attachments.Add(path)`, and sends the message asynchronously with `await smtp.SendAsync(msg)`.
+6. A success dialog confirms the recipient address. If authentication fails, a specific error message is shown distinguishing credential errors from general network failures.
+
+## EmailSettings
+
+Sender preferences are persisted between sessions using a lightweight JSON file stored in `Application.UserAppDataPath`. The `EmailSettings` class provides two static methods to read and write the saved sender address.
+
+```csharp
+// Persisted settings model (stored as email_settings.json)
+internal static class EmailSettings
+{
+    // Returns the saved sender address, or an empty string if none is stored
+    public static string CargarRemitente()
+
+    // Saves the sender address for future sessions
+    public static void GuardarRemitente(string correo)
+}
+```
+
+The settings file is located at:
+
+```
+%APPDATA%\ExploradorDeArchivos\{version}\email_settings.json
+```
+
+The JSON structure is minimal:
+
+```json
+{
+  "Remitente": "you@example.com"
+}
+```
+
+## Common SMTP Settings
+
+The current implementation connects to Gmail on port 587 with STARTTLS. To target a different provider, update the `SmtpHost`, `SmtpPort`, and sender credential constants in `FormCorreoEnvio.cs`.
+
+| Provider | Host | Port | Security |
+|---|---|---|---|
+| Gmail | smtp.gmail.com | 587 | TLS |
+| Outlook / Hotmail | smtp.office365.com | 587 | TLS |
+| Yahoo | smtp.mail.yahoo.com | 465 | SSL |
+
+<Warning>
+  Gmail requires an **App Password** if two-factor authentication is enabled on the sender account. Standard account passwords are rejected with an `AuthenticationException`. Generate an App Password at [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) and use it in place of your regular password.
+</Warning>
+
+<Note>
+  The file attached to the email is read from the exact path returned by the `SaveFileDialog` during export. If the file is moved, renamed, or deleted before the send dialog is submitted, the `Validar()` method will detect the missing file with `File.Exists(_archivoAdjunto)` and show an error — no email will be sent.
+</Note>

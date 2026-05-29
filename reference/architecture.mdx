@@ -1,0 +1,219 @@
+---
+title: "Explorador de Archivos Architecture and Code Map"
+sidebarTitle: "Architecture"
+description: "Overview of all Windows Forms windows, shared models, utility classes, data pipeline modules, and the key third-party libraries that power Explorador de Archivos."
+---
+
+Explorador de Archivos is a single-process WinForms application targeting .NET 8 (`net8.0-windows`). `Form1` is the main window and acts as an orchestrator — it holds singleton references to each sub-tool form (`_formMP3`, `_formMP4`, `_formDataBase`, `_formCorrector`, `_formEdit`, `_formGrabadora`, `_formEditarFotos`) and routes user actions to them. All sub-forms are created lazily and kept alive for the duration of the session; closing `Form1` triggers a coordinated shutdown that calls `CerrarCompletamente()` on the audio player before disposing it.
+
+## Forms (Windows)
+
+Each window is a separate WinForms `Form` class. The table below lists every form in the project and its responsibility.
+
+| Form | Description |
+|------|-------------|
+| `Form1` | Main file explorer — dual-pane `DataGridView`, quick-access sidebar, back/forward/drives toolbar |
+| `FormMP3` | Audio player with playlist management, playback controls, lyrics display, and album art |
+| `FormMP4` | Video player backed by LibVLCSharp |
+| `FormEditarFotos` | Photo editor with drawing canvas, crop, color adjustments, and GPS metadata viewer |
+| `FormGrabadora` | Audio and video recorder using NAudio and AForge/FFMpeg |
+| `FormDataBase` | Data Fusion Arena — multi-source import, interactive charts, and file export |
+| `FormCorrector` | Data Cleaner — automatic type inference, validation, and cell-level corrections |
+| `FormEdit` | Multi-format file editor (text, CSV, JSON, XML, and more) |
+| `FormCorreoEnvio` | Email sender for exporting and sharing files via SMTP |
+| `FrmEditarCancion` | ID3 tag editor for reading and writing audio file metadata |
+| `ColumnTypesForm` | Column type override dialog used within the Data Cleaner workflow |
+
+## Shared Models
+
+These classes are used across multiple forms and represent the core data structures of the application.
+
+### `Cancion`
+
+Represents a single audio track in a playlist.
+
+```csharp
+public class Cancion
+{
+    public string Nombre { get; set; }   // Display name (filename without extension)
+    public string Ruta   { get; set; }   // Absolute path to the audio file
+}
+```
+
+### `Reproduccion`
+
+Serialized playlist state saved to and loaded from `playlist.json`. This is the root object that persists between sessions.
+
+```csharp
+public class Reproduccion
+{
+    public List<Cancion> PlayList    { get; set; }  // Ordered list of tracks
+    public int           IndiceActual { get; set; } // Index of the currently selected track
+    public double        TiempoActual { get; set; } // Playback position in seconds
+}
+```
+
+### `DataItem`
+
+Universal data row used by both the Data Fusion Arena (`FormDataBase`) and the Data Cleaner (`FormCorrector`). Only the fields that correspond to the row's `Source` are populated; all others remain at their default values.
+
+```csharp
+public enum DataSource { CSV, JSON, XML, TXT, DB }
+
+public class DataItem
+{
+    // Metadata
+    public int        Id     { get; set; }
+    public DataSource Source { get; set; }
+
+    // CSV — Laptops
+    public string Company  { get; set; }
+    public string TypeName { get; set; }
+    public string Cpu      { get; set; }
+    public int    Ram      { get; set; }
+    public double Price    { get; set; }
+
+    // JSON — Video games
+    public string Title    { get; set; }
+    public string Genre    { get; set; }
+    public double Sales    { get; set; }
+    public string Platform { get; set; }
+
+    // XML — Inventory
+    public string Tipo   { get; set; }
+    public string Modelo { get; set; }
+    public int    Stock  { get; set; }
+
+    // TXT — Performance log
+    public int    Minuto      { get; set; }
+    public double UsoCPU      { get; set; }
+    public double Temperatura { get; set; }
+    public double FPS         { get; set; }
+
+    // DB — Users
+    public string UserName { get; set; }
+    public string Email    { get; set; }
+    public string Region   { get; set; }
+
+    // Unmapped columns from imported files
+    public Dictionary<string, string> ExtraFields { get; set; }
+
+    // Computed summary label based on Source
+    public string Label { get; }
+}
+```
+
+A computed `Label` property returns a human-readable summary of the row (`Company TypeName` for CSV rows, `Title` for JSON rows, `Tipo - Modelo` for XML rows, `Min XX` for TXT rows, and `UserName` for DB rows).
+
+### `EmailSettings`
+
+Static helper that persists the sender's email address between sessions. Settings are stored as JSON at `%AppData%\<AppVersion>\email_settings.json` (resolved via `Application.UserAppDataPath`).
+
+```csharp
+internal static class EmailSettings
+{
+    public static string CargarRemitente();          // Loads saved sender address
+    public static void   GuardarRemitente(string);  // Persists sender address
+}
+```
+
+## Utility Classes
+
+### `PlaylistGlobal`
+
+A static singleton that manages the shared `List<Cancion>` playlist, allowing `Form1` and `FormMP3` to exchange track information without direct coupling.
+
+| Method | Description |
+|--------|-------------|
+| `ObtenerPlaylist()` | Returns the full playlist list |
+| `AgregarCancion(string ruta)` | Adds a track if it is not already present (case-insensitive path check) |
+| `EstablecerCancionActual(string ruta)` | Sets `_indiceActual` to the matching track |
+| `ObtenerCancionActual()` | Returns the `Cancion` at the current index, or `null` |
+| `ObtenerIndiceActual()` | Returns the current index (`-1` when empty) |
+| `EstablecerIndiceActual(int)` | Sets the current index directly |
+| `ObtenerCantidad()` | Returns the number of tracks in the playlist |
+| `Limpiar()` | Clears the playlist and resets the index to `-1` |
+
+### `Desordenador`
+
+Implements a Fisher-Yates shuffle for generating random playlist orders.
+
+```csharp
+var d = new Desordenador(total);   // Allocates int[total]
+d.Fill();                          // Fills vector with 1, 2, … total
+d.Shuffle();                       // Randomizes in-place (Fisher-Yates)
+int[] randomOrder = d.Vector;      // The shuffled 1-based index array
+```
+
+- `Fill()` populates the internal array with 1-based sequential integers.
+- `Shuffle()` performs an in-place Fisher-Yates shuffle using `System.Random`.
+- `Vector` exposes the resulting shuffled array.
+- A default constructor creates a 100-element array; the parameterized constructor accepts any size.
+
+### `ImageProcessor`
+
+A static class that applies combined brightness, contrast, and saturation adjustments to a `Bitmap` using a `ColorMatrix`.
+
+```csharp
+Bitmap result = ImageProcessor.Adjust(
+    source,
+    brightness: 10,    // -100 to +100
+    contrast:   5,     // -100 to +100
+    saturation: 0      // -100 to +100
+);
+```
+
+### `MusicMetadataFetcher`
+
+An asynchronous API client that retrieves song lyrics from the Genius API and album art from the Spotify API.
+
+```csharp
+var fetcher = new MusicMetadataFetcher(geniusToken, spotifyClientId, spotifyClientSecret);
+string lyrics   = await fetcher.GetLyricsAsync(artist, title);
+Image  albumArt = await fetcher.GetAlbumArtAsync(artist, title);
+```
+
+### `DoubleBufferedPictureBox`
+
+A `PictureBox` subclass with `DoubleBuffered = true` set in the constructor. Used in the photo editor and audio player to eliminate flicker during animated redraws.
+
+## Data Pipeline
+
+The data pipeline lives under `Processing/` and powers both the Data Fusion Arena and the Data Cleaner. The classes below handle the full lifecycle of an imported data file.
+
+| Class | Role |
+|-------|------|
+| `IFileReader` | Common interface implemented by all file readers; exposes a single `Read(path)` method |
+| `CsvFileReader` | Reads delimited text files via CsvHelper |
+| `ExcelFileReader` | Reads `.xlsx` workbooks via the Open XML SDK |
+| `JsonFileReader` | Deserializes JSON arrays via Newtonsoft.Json |
+| `XmlFileReader` | Reads XML documents into `DataItem` lists |
+| `WordFileReader` | Extracts tabular data from `.docx` files |
+| `DataPipeline` | Orchestrates reading → FluentValidation → ordering; returns a `List<DataItem>` |
+| `DataProcessor` | Filtering, grouping, duplicate detection, Insertion Sort / Bubble Sort, and automatic chart-pair detection — all without LINQ `.OrderBy` |
+| `ColumnTypeInferrer` | Infers the dominant type of each column and flags individual cells that do not match |
+| `DynamicRowValidator` | FluentValidation-based row validator; rules are generated dynamically from inferred column types |
+| `DataCleaner` | Applies automatic corrections to cells flagged by `DynamicRowValidator` |
+| `DataExporter` | Writes the cleaned `List<DataItem>` back to CSV, Excel, JSON, or XML |
+| `CellError` | Value object representing a single validation failure: `{ int RowIndex, string ColumnName, CellErrorKind ErrorKind }` |
+
+## Key Third-Party Libraries
+
+| Library | NuGet Package | Purpose |
+|---------|--------------|---------|
+| NAudio | `NAudio` | Audio playback and recording |
+| LibVLCSharp | `LibVLCSharp.WinForms` | Video playback via native VLC |
+| TagLibSharp | `TagLibSharp` | MP3 / ID3 tag read and write |
+| AForge | `AForge.Video.DirectShow` | Webcam capture for the recorder |
+| FFMpegCore | `FFMpegCore` | Audio-video muxing after recording |
+| CsvHelper | `CsvHelper` | CSV parsing with header mapping |
+| Open XML SDK | `DocumentFormat.OpenXml` | Excel (`.xlsx`) and Word (`.docx`) read-write |
+| Npgsql | `Npgsql` | PostgreSQL database connectivity |
+| MySqlConnector | `MySqlConnector` | MariaDB / MySQL database connectivity |
+| SqlClient | `Microsoft.Data.SqlClient` | SQL Server database connectivity |
+| SpotifyAPI.Web | `SpotifyAPI.Web` | Spotify album art retrieval |
+| Genius.NET | `Genius.NET` | Genius lyrics API client |
+| MailKit | `MailKit` | SMTP email sending |
+| MetadataExtractor | `MetadataExtractor` | EXIF / GPS extraction from images |
+| FluentValidation | `FluentValidation` | Row-level validation rules in the data pipeline |
+| HtmlAgilityPack | `HtmlAgilityPack` | HTML scraping fallback for lyrics |

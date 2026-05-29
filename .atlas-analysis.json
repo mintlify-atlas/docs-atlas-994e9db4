@@ -1,0 +1,89 @@
+{
+  "projectType": "saas",
+  "projectName": "Explorador de Archivos",
+  "projectDescription": "A feature-rich Windows desktop file explorer built with C# and WinForms, integrating a media player, photo editor, audio/video recorder, document editor, data analysis suite, and music metadata fetching.",
+  "theme": "palm",
+  "primaryColor": "#3B7DD8",
+  "lightColor": "#E8F0FC",
+  "darkColor": "#1A3A6E",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/file-explorer",
+              "features/media-player",
+              "features/video-player",
+              "features/photo-editor",
+              "features/recorder"
+            ]
+          },
+          {
+            "group": "Data Tools",
+            "pages": [
+              "features/data-fusion",
+              "features/data-cleaner",
+              "features/file-editor"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/music-metadata",
+              "integrations/databases",
+              "integrations/email"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/architecture",
+              "reference/configuration",
+              "reference/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "File system browser with icon-based grid view and quick-access shortcuts",
+    "MP3/WAV/AAC audio player with playlist management, shuffle, loop, and metadata display",
+    "MP4/AVI/MKV video player powered by LibVLC with repeat modes and seek control",
+    "Photo editor with brightness/contrast/saturation adjustment, drawing, and crop tools",
+    "Audio and screen/webcam recorder using NAudio, AForge, and FFMpeg",
+    "Data Fusion Arena: import CSV, JSON, XML, TXT, Excel, Word files and databases (SQL Server, MariaDB, PostgreSQL) with automatic chart generation",
+    "Data Cleaner pipeline with column-type inference, validation, and error highlighting",
+    "Multi-format file editor for CSV, XLSX, DOCX, PPTX, TXT, JSON, XML, and PDF",
+    "Music metadata fetching via Genius API (lyrics) and Spotify API (album art)",
+    "Email export with MailKit for sending exported data files"
+  ],
+  "publicApiSurface": [
+    "Form1 — main file explorer window (LoadDirectory, AbrirReproductor, InitializeQuickAccess)",
+    "FormMP3 — audio player (AgregarYReproducir, AgregarALista, CerrarCompletamente, ActualizarPlaylist, ReproducirCancionActual)",
+    "FormMP4 — video player (CargarYReproducir)",
+    "FormEditarFotos — photo editor (AbrirImagen)",
+    "FormDataBase — data fusion arena (ImportFile, ImportFromDb, ExportToDb)",
+    "FormCorrector — data cleaner pipeline (DataPipeline, ColumnTypeInferrer)",
+    "FormEdit — multi-format file editor",
+    "FormGrabadora — audio and video recorder",
+    "MusicMetadataFetcher — Genius/Spotify metadata (ActualizarMetadatosDelArchivoAsync, UltimaLetraDescargada, UltimaPortadaDescargada)",
+    "ImageProcessor — image adjustments (Adjust)",
+    "DataReader — file import (LoadFromFile, ReadFromSqlServer, ReadFromMariaDb, ReadFromPostgreSql)",
+    "DataProcessor — data processing (DynamicSort, DynamicFilter, DynamicGroupSum, DetectDuplicates, AutoDetectSmartPairs)",
+    "DatabaseExporter — DB export (ExportToSqlServer, ExportToMariaDb, ExportToPostgreSql)",
+    "PlaylistGlobal — global playlist state (AgregarCancion, ObtenerPlaylist, EstablecerCancionActual)",
+    "Desordenador — Fisher-Yates shuffle utility (Fill, Shuffle, Vector)"
+  ]
+}

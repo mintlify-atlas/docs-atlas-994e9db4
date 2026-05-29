@@ -1,0 +1,96 @@
+---
+title: "Record Audio and Video with the Built-In Recorder"
+sidebarTitle: "Recorder"
+description: "Capture microphone audio as WAV, record your screen or webcam as AVI, and mux them into a final video file using FFMpeg — all from the Grabadora panel."
+---
+
+**FormGrabadora** is the recording panel built into Explorador de Archivos. Open it from the main toolbar to capture microphone audio, record your screen, or record from a webcam — all with synchronized audio. Under the hood it uses **NAudio's `WaveInEvent`** for audio capture, **AForge.Video.DirectShow** (`FilterInfoCollection` + `VideoCaptureDevice`) for webcam access, and **FFMpegCore** to mux the raw frames and WAV audio into a finished MP4 file.
+
+## Audio Recording
+
+Audio capture is handled entirely by NAudio and writes a standard WAV file.
+
+<Steps>
+  <Step title="Select your microphone">
+    On startup, `RefreshAudioDevices` enumerates all `WaveIn` devices and populates the `cmbAudioDevices` dropdown. The label `lblAudioStatus` confirms whether a device was detected.
+  </Step>
+  <Step title="Start recording">
+    Click **Iniciar Grabación**. A `WaveInEvent` is created with the chosen device index and a `WaveFormat` of **44 100 Hz, 16-bit, stereo**. A `WaveFileWriter` is opened at a timestamped path inside the recordings folder and begins writing every buffer delivered by `WaveInEvent_DataAvailable`.
+  </Step>
+  <Step title="Monitor elapsed time">
+    A `System.Diagnostics.Stopwatch` (`_stopwatch`) runs alongside a one-second UI timer (`_timerRecordingTime`) that formats elapsed time as `HH:MM:SS` in `lblRecordingTime`.
+  </Step>
+  <Step title="Stop and save">
+    Click **Detener**. `_waveInEvent.StopRecording()` is called, the `WaveFileWriter` is flushed and disposed, and the finished WAV file is left in `%LocalAppData%\Grabaciones\`.
+  </Step>
+</Steps>
+
+## Video Recording
+
+Video mode is controlled by two boolean flags — `_isAudioOnly` and `_useCameraInsteadOfScreen` — giving three distinct recording modes.
+
+### Screen Capture
+
+When `_isAudioOnly = false` and `_useCameraInsteadOfScreen = false`, the recorder captures the screen:
+
+- `_timerVideoCapture` fires at `1000 / VIDEO_FPS` ms intervals (≈ 33 ms for 30 fps).
+- Each tick calls `Graphics.CopyFromScreen` into a `1280 × 720` `Format32bppRgb` `Bitmap` named `_frameBuffer`.
+- The cloned frame is appended to `_videoFrames` (a `List<Bitmap>`) and simultaneously shown in the live `_previewBox` (`PictureBox`).
+
+### Webcam Capture
+
+When `_useCameraInsteadOfScreen = true`, the recorder uses the first webcam found by `FilterInfoCollection(FilterCategory.VideoInputDevice)`:
+
+```csharp
+_videoSource = new VideoCaptureDevice(_videoDevices[0].MonikerString);
+_videoSource.NewFrame += VideoSource_NewFrame;
+_videoSource.Start();
+```
+
+Each `NewFrame` event clones the incoming frame into a `Format24bppRgb` bitmap, appends it to `_videoFrames`, and updates `_previewBox` — even crossing the UI thread boundary via `Invoke` when needed.
+
+Both screen and webcam modes also start a `WaveInEvent` (at `AUDIO_SAMPLE_RATE = 44100 Hz`) that writes to a temporary WAV file in `%TEMP%` for later muxing.
+
+## Muxing with FFMpeg
+
+After recording stops, `SaveVideoFileAsync` hands work off to a background `Task` so the UI stays responsive:
+
+<Steps>
+  <Step title="Export frames to disk">
+    All `Bitmap` objects in `_videoFrames` are saved as sequentially numbered PNG files (`frame_000000.png`, `frame_000001.png`, …) inside a temporary folder under `%TEMP%`. A `Parallel.For` loop (max 4 threads) is used to speed up the export.
+  </Step>
+  <Step title="Invoke FFMpeg">
+    `CreateMP4WithFFmpeg` launches the FFMpeg binary as a child `Process`:
+
+    ```bash
+    ffmpeg -framerate 30 -i "frame_%06d.png" -i "temp_audio.wav" \
+           -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest output.mp4
+    ```
+
+    If no WAV file exists (audio device unavailable), the `-i audio` argument is omitted and only the video stream is encoded.
+  </Step>
+  <Step title="Clean up and confirm">
+    On exit code 0, the temporary frames folder and the temporary WAV file are deleted. The final MP4 is saved to `%LocalAppData%\Grabaciones\` and a success dialog shows the file name and size in MB.
+  </Step>
+</Steps>
+
+The FFMpeg binary is resolved at runtime by combining `AppDomain.CurrentDomain.BaseDirectory` with the constant path `ffmpeg\bin\ffmpeg.exe`.
+
+## Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `VIDEO_WIDTH` | `1280` | Screen capture frame width (px) |
+| `VIDEO_HEIGHT` | `720` | Screen capture frame height (px) |
+| `VIDEO_FPS` | `30` | Target frame rate for video capture |
+| `AUDIO_SAMPLE_RATE` | `44100` | WAV sample rate (Hz) |
+| `_ffmpegPath` | `ffmpeg\bin\ffmpeg.exe` | Path to FFMpeg binary, relative to app directory |
+| `_recordingsFolder` | `%LocalAppData%\Grabaciones` | Output folder for all recordings |
+
+<Warning>
+  The FFMpeg binary **must** be placed at `ffmpeg\bin\ffmpeg.exe` relative to the application's output directory (e.g. `bin\Debug\net8.0-windows\ffmpeg\bin\ffmpeg.exe`) before using any video recording mode. Without it, `CreateMP4WithFFmpeg` will throw a `FileNotFoundException` and no video file will be saved. Download a Windows build from [https://ffmpeg.org](https://ffmpeg.org).
+</Warning>
+
+<Tip>
+  Audio-only recording mode (`_isAudioOnly = true`, the default) writes directly to a WAV file using NAudio and **does not require FFMpeg** at all. If you only need to capture microphone audio, you can use the recorder without installing FFMpeg.
+</Tip>

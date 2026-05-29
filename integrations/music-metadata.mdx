@@ -1,0 +1,100 @@
+---
+title: "Fetch Lyrics and Album Art with Genius and Spotify"
+sidebarTitle: "Music Metadata"
+description: "Configure Genius and Spotify API credentials so the audio player automatically downloads song lyrics and album art and embeds them into your MP3 files."
+---
+
+`MusicMetadataFetcher` enriches your MP3 library automatically. When a song starts playing in the built-in audio player, the fetcher runs asynchronously in the background — reaching out to the Genius API for lyrics and the Spotify Web API for album art, then embedding both directly into the file's ID3 tags so the data persists across sessions.
+
+## How it Works
+
+The fetcher is constructed with three credentials and manages its own HTTP state for the lifetime of the player session.
+
+**Constructor**
+
+```csharp
+public MusicMetadataFetcher(
+    string geniusAccessToken,
+    string spotifyClientId,
+    string spotifyClientSecret)
+```
+
+All three parameters are required — passing `null` throws `ArgumentNullException`.
+
+**Spotify token acquisition**
+
+Before searching for album art, the fetcher calls `POST https://accounts.spotify.com/api/token` using the `client_credentials` grant type. The Base64-encoded `clientId:clientSecret` pair is sent in the `Authorization: Basic …` header. The returned bearer token is stored in `_spotifyAccessToken` and reused until `_spotifyTokenExpiry` is reached (the token lifetime minus a 60-second safety margin, typically ~3540 seconds).
+
+**Genius lyrics retrieval**
+
+The fetcher calls `GET https://api.genius.com/search?q={artist}+{title}` with an `Authorization: Bearer {token}` header. It extracts the song page URL from the JSON response, then uses **HtmlAgilityPack** to load the page and scrape all `div` elements whose `class` contains `Lyrics__Container`. `<br>` tags are converted to newlines before stripping the remaining HTML. A legacy fallback targets the older `div.lyrics` container for back-catalog tracks.
+
+**Embedding into the file**
+
+Results are written into the MP3 file using **TagLibSharp**:
+
+- Lyrics are stored in `file.Tag.Lyrics`.
+- Cover art is stored as a `TagLib.Picture` with type `FrontCover` in `file.Tag.Pictures`.
+
+The file is opened with `FileShare.ReadWrite` to tolerate concurrent playback, and the write is retried up to three times (300 ms apart) if an `IOException` is thrown.
+
+**In-memory cache for the UI**
+
+After each fetch the static properties `UltimaLetraDescargada` and `UltimaPortadaDescargada` are updated so the player UI can display the data immediately without re-reading the file from disk.
+
+## Configuration
+
+<Steps>
+  <Step title="Create a Genius API client">
+    Sign in or register at [https://genius.com/api-clients](https://genius.com/api-clients), create a new API client, and copy the **Client Access Token** from the client details page.
+  </Step>
+  <Step title="Create a Spotify Developer app">
+    Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), create a new app, and note the **Client ID** and **Client Secret** from the app settings page.
+  </Step>
+  <Step title="Set the credentials in FormMP3.cs">
+    Open `FormMP3.cs` and update the three constants at the top of the constructor:
+
+    ```csharp
+    const string geniusToken         = "YOUR_GENIUS_TOKEN";
+    const string spotifyClientId     = "YOUR_SPOTIFY_CLIENT_ID";
+    const string spotifyClientSecret = "YOUR_SPOTIFY_CLIENT_SECRET";
+    ```
+  </Step>
+  <Step title="Rebuild the application">
+    Build the solution (`Ctrl+Shift+B` in Visual Studio) and run. The fetcher activates automatically when the next track begins playback.
+  </Step>
+</Steps>
+
+## ActualizarMetadatosDelArchivoAsync
+
+```csharp
+// Returns true if metadata was updated, false otherwise
+public async Task<bool> ActualizarMetadatosDelArchivoAsync(string filePath)
+```
+
+This is the main entry point called by the audio player on each track change. It performs the following steps in order:
+
+1. Resets `UltimaLetraDescargada` and `UltimaPortadaDescargada` to `null`.
+2. Calls `ExtraerMetadatos(filePath)` to read the existing ID3 tags (artist, title, album). If the `Title` tag is missing or contains a hyphen, the filename is parsed using the `"Artist - Title"` convention.
+3. Calls `ObtenerLetraAsync(artist, title)` against the Genius API.
+4. Calls `ObtenerPortadaAsync(artist, album)` — Spotify is tried first, then iTunes, then Last.fm as fallbacks.
+5. Stores both results in the static cache properties.
+6. If the file is not already locked, opens it with `FileShare.ReadWrite`, skips tags that already have data, writes any new data, and calls `file.Save()`.
+7. Returns `true` if at least one piece of metadata was fetched (even when the write to disk was skipped due to the file being in use — data is still available in the static properties for the UI).
+
+## Static Cache Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `UltimaLetraDescargada` | `string` | The full lyrics text of the most recently fetched song. Set to `null` at the start of each fetch cycle. |
+| `UltimaPortadaDescargada` | `byte[]` | Raw JPEG bytes of the most recently fetched album cover. Set to `null` at the start of each fetch cycle. |
+
+Both properties have `private set` — they are written only by `ActualizarMetadatosDelArchivoAsync`. The player UI reads them immediately after the async task completes to update the lyrics panel and cover art picture box without a second disk read.
+
+<Note>
+  The static `_coverCache` (`Dictionary<string, string>`) stores the image URL keyed by `"{artist}_{album}"` (lowercased). Once an entry is present, subsequent plays of the same track within the same app session skip the Spotify search and download the image directly from the cached URL, saving one round-trip per repeated track.
+</Note>
+
+<Warning>
+  The API credentials are currently hardcoded as `const string` values inside `FormMP3.cs`. For production builds or any public distribution, move them to an external configuration file (e.g., `appsettings.json`) or an encrypted credential store and exclude that file from source control.
+</Warning>

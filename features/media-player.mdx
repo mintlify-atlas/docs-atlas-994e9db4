@@ -1,0 +1,171 @@
+---
+title: "Play and Manage Audio Files with the MP3 Player"
+sidebarTitle: "Audio Player"
+description: "Full-featured audio player supporting MP3, WAV, and AAC with playlist management, shuffle, loop, seek, volume control, album art, and lyrics display."
+---
+
+The audio player (`FormMP3`) is a full-featured music station built on top of **NAudio's `WaveOutEvent`** and **`AudioFileReader`**. It opens automatically as a floating window when you double-click any supported music file in the file explorer, or you can launch it independently and build a playlist from scratch. The player sits alongside the main `Form1` window and stays open across navigation, so your music keeps playing while you continue browsing files.
+
+## Supported Formats
+
+The player handles every format that NAudio's `AudioFileReader` can decode. File-type detection in the explorer uses the same `IsMusic` extension check that drives auto-launch:
+
+```csharp
+private bool IsMusic(string ext) => ext is "mp3" or "wav" or "aac";
+```
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| MP3 | `.mp3` | ID3 tag support via TagLibSharp |
+| WAV | `.wav` | Uncompressed PCM |
+| AAC | `.aac` | Advanced Audio Coding |
+
+## Adding Songs
+
+There are two ways to populate the playlist:
+
+<Steps>
+  <Step title="Auto-add from the File Explorer">
+    Double-click a music file in `Form1`. The explorer calls `_formMP3.AgregarYReproducir(path)`, which adds the track to `lstLista` (if not already present) and immediately begins playback. A single-click (row selection) while the player is open silently queues the file via `AgregarALista(path)` without interrupting the current track.
+  </Step>
+  <Step title="Open File Dialog">
+    Click the file-search icon (`pictSearch`) inside the player window. This opens a multi-select `OpenFileDialog` filtered to `*.mp3;*.wav;*.aac;*.flac;*.ogg`. Each selected file is checked against every existing entry in `lstLista`; only files whose path is not already present are added. A summary message reports how many duplicates were skipped.
+  </Step>
+</Steps>
+
+Duplicate detection uses a case-insensitive path comparison (`StringComparison.OrdinalIgnoreCase`) so the same file cannot appear twice regardless of how the path was typed.
+
+## Playlist Management
+
+The playlist is displayed in `lstLista`, a custom owner-drawn `ListBox` (`DrawMode.OwnerDrawFixed`) that renders each entry as:
+
+```
+{index + 1}. {filename without extension}   ({mm:ss})
+```
+
+Duration is read live from `AudioFileReader.TotalTime` for each draw call. The following operations are available:
+
+<CardGroup cols={2}>
+  <Card title="Remove Selected Track" icon="trash" href="#playlist-management">
+    `btnEliminar` removes the selected entry. If the deleted track was playing, playback automatically advances to the next song. If the playlist becomes empty, the player resets to the idle state.
+  </Card>
+  <Card title="Clear All Tracks" icon="circle-xmark" href="#playlist-management">
+    `btnDeleteList` clears the entire `lstLista`, stops and disposes the `WaveOutEvent` and `AudioFileReader` instances, resets all time labels, and restores the default album-art image.
+  </Card>
+  <Card title="Save as M3U" icon="floppy-disk" href="#playlist-management">
+    `btnSavePlaylist` opens a `FolderBrowserDialog` and writes `playlist.m3u` using the `#EXTM3U` header followed by one absolute path per line, encoded as UTF-8.
+  </Card>
+  <Card title="Search Track" icon="magnifying-glass" href="#playlist-management">
+    `pictSearchTxt` performs a case-insensitive prefix search over all items in `lstLista` and selects the first match found, scrolling it into view automatically.
+  </Card>
+</CardGroup>
+
+## Playback Controls
+
+All transport controls operate on the shared `WaveOutEvent outputDevice` and `AudioFileReader audioFile` instances:
+
+| Control | Action |
+|---------|--------|
+| `pictPause` | **Play / Pause** toggle. If no file is loaded, starts the currently selected track. |
+| `pictNext` | **Next track** — advances to the next index (or the next shuffle index if shuffle is active). Wraps to index 0 at the end of the list. |
+| `pictBack` | **Previous track** — goes to the previous index (or previous shuffle index). Wraps to the last track from index 0. |
+| `pictReset` | **Reset to start** — sets `audioFile.CurrentTime = TimeSpan.Zero` and resumes playback if it was already playing. |
+| `pictPass` | **Skip forward +5 s** — adds 5 seconds to `audioFile.CurrentTime`. |
+| `pictDelay` | **Rewind −5 s** — subtracts 5 seconds, or snaps to `TimeSpan.Zero` if less than 5 seconds remain before the start. |
+| `trackVolumen` | **Volume** — maps the slider value (0–100) directly to `audioFile.Volume` as a `float` in the range 0.0–1.0. |
+| `trackDuracion` | **Seek** — sets `audioFile.CurrentTime` to the selected second. A 500 ms `timer1` keeps the slider and time labels (`label2`, `label3`) in sync during playback. |
+
+## Shuffle and Loop
+
+Loop and shuffle are mutually exclusive modes managed by the `isLooping` and `isShuffle` boolean flags.
+
+**Loop mode** (`pictLoop`) repeats the current track indefinitely. When the 500 ms timer detects that `trackDuracion.Value >= trackDuracion.Maximum`, it resets `audioFile.CurrentTime` to `TimeSpan.Zero` and calls `outputDevice.Play()` again. The button background turns **blue** when active and reverts to `Transparent` when toggled off.
+
+**Shuffle mode** (`pictRandom`) generates a randomised playback order using the `Desordenador` class, which implements a Fisher-Yates shuffle:
+
+```csharp
+public void Shuffle()
+{
+    Random random = new Random();
+    for (int i = 0; i < vector.Length; i++)
+    {
+        int j = random.Next(i, vector.Length);
+        int temp = vector[i];
+        vector[i] = vector[j];
+        vector[j] = temp;
+    }
+}
+```
+
+`RecalcularShuffle()` creates a `Desordenador` sized to the current playlist length, calls `Fill()` then `Shuffle()`, and builds `ordenAleatorio` — an `int[]` where the currently playing track is always placed first so playback continues uninterrupted. The `indiceShuffle` cursor advances through `ordenAleatorio` as each track ends or when Next/Previous is pressed. Enabling shuffle automatically disables loop, and vice versa.
+
+## Metadata Display
+
+Selecting a track while the player is open populates `dataGridView1` (inside `FormMP3`) via `VerPropiedades(cancion)`. The grid shows two columns — **Propiedad** and **Valor** — with the following rows:
+
+| Property | Source |
+|----------|--------|
+| Duración | `AudioFileReader.TotalTime` |
+| Frecuencia | `AudioFileReader.WaveFormat.SampleRate` + `" Hz"` |
+| Nombre | `FileInfo.Name` |
+| Artista | `TagLib.File.Tag.Performers[0]` |
+| Álbum | `TagLib.File.Tag.Album` |
+| Ubicación | `FileInfo.FullName` |
+| Carpeta contenedora | `FileInfo.DirectoryName` |
+| Tamaño | `FileInfo.Length / 1024.0` formatted as KB |
+| Fecha de creación | `FileInfo.CreationTime` |
+| Último acceso | `FileInfo.LastAccessTime` |
+
+Artist and Album are read from the file's ID3 tags via **TagLibSharp** (`TagLib.File.Create(path)`). If no tag data is present, both fields display `"Desconocido"`.
+
+## Album Art and Lyrics
+
+As soon as a track starts playing, `ReproducirCancion` launches `BuscarYActualizarMetadatosAsync` asynchronously on a background thread. This method uses `MusicMetadataFetcher` — which holds API credentials for both **Genius** (lyrics) and **Spotify** (album art) — to fetch missing metadata:
+
+<Steps>
+  <Step title="Fetch Lyrics">
+    `MusicMetadataFetcher` queries the Genius API for the song's lyrics. The result is stored in the static field `MusicMetadataFetcher.UltimaLetraDescargada` and embedded into the MP3 file's `Tag.Lyrics` field via TagLibSharp.
+  </Step>
+  <Step title="Fetch Album Art">
+    The Spotify API is queried for the album cover image. The raw bytes are stored in `MusicMetadataFetcher.UltimaPortadaDescargada` and written into the MP3 file's `Tag.Pictures` array.
+  </Step>
+  <Step title="Update the UI">
+    Once both requests complete, `Invoke` marshals the result back to the UI thread. `MostrarPortadaDesdeMP3` reads the embedded image bytes and displays them in `pictureBoxAlbum`. `MostrarLetraEnListBox` splits `Tag.Lyrics` by line and adds each line as a separate item in `listBoxLetras`, enabling smooth scrolling through the full lyrics.
+  </Step>
+</Steps>
+
+If the track already has embedded art and lyrics from a previous fetch, the UI is populated immediately from the file tags without making any network requests.
+
+## State Persistence
+
+When the main application window closes, `Form1` calls `_formMP3.CerrarCompletamente()`, which serialises the current state to disk before stopping audio playback:
+
+```csharp
+// Saved to: %AppData%\MiReproductor\playlist.json
+Reproduccion estado = new Reproduccion()
+{
+    PlayList      = lstLista.Items.Cast<Cancion>().ToList(),
+    IndiceActual  = lstLista.SelectedIndex >= 0 ? lstLista.SelectedIndex : 0,
+    TiempoActual  = audioFile?.CurrentTime.TotalSeconds ?? 0
+};
+```
+
+The `Reproduccion` object is serialised with `System.Text.Json` (indented). On the next launch, `CargarEstado()` reads the file, restores every track into `lstLista`, seeks the last track to its saved position, and leaves it in the **paused** state so you can resume exactly where you left off.
+
+## The Cancion Model
+
+Every entry in the playlist is represented by the `Cancion` class:
+
+```csharp
+public class Cancion
+{
+    public string Nombre { get; set; }
+    public string Ruta   { get; set; }
+}
+```
+
+`Nombre` stores the display name (typically the filename without extension) and `Ruta` holds the full absolute path to the audio file. The `PlaylistGlobal` static class acts as an in-memory shared store that keeps `Form1` and `FormMP3` in sync — `Form1` calls `PlaylistGlobal.AgregarCancion(path)` on selection, and `FormMP3` calls `ActualizarPlaylist()` to mirror the global list into `lstLista`.
+
+<Tip>
+  The M3U export is written with UTF-8 encoding and opens without issues in VLC, Windows Media Player, foobar2000, and most other players that support the `#EXTM3U` format.
+</Tip>

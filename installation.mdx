@@ -1,0 +1,102 @@
+---
+title: "Install Explorador de Archivos on Windows"
+sidebarTitle: "Installation"
+description: "Step-by-step guide to building and running Explorador de Archivos on Windows with Visual Studio 2022 and the .NET 8 SDK."
+---
+
+Explorador de Archivos is a Windows-only WinForms application. The project targets `net8.0-windows` and uses Win32-specific APIs throughout, so it cannot be built or run on macOS or Linux. Follow the steps below to get it compiling and running on your machine.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Visual Studio 2022 or newer">
+    Download and install [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) (Community edition is free). During installation, select the **.NET desktop development** workload, which includes the WinForms designer and all required build tools.
+  </Step>
+  <Step title=".NET 8 SDK">
+    Confirm the .NET 8 SDK is installed by running `dotnet --version` in a terminal. If it is missing, download it from [dot.net](https://dotnet.microsoft.com/download/dotnet/8.0). Visual Studio 2022 v17.8+ bundles it automatically with the desktop workload.
+  </Step>
+  <Step title="Windows 10 or Windows 11">
+    The application targets `net8.0-windows` and depends on WinForms, which requires Windows 10 (build 1903 or later) or Windows 11.
+  </Step>
+  <Step title="VLC media player">
+    [Install VLC](https://www.videolan.org/vlc/) for your architecture (x64 recommended). The `VideoLAN.LibVLC.Windows` NuGet package bundles the native LibVLC binaries, but having VLC installed ensures all codec plugins are available for the video player.
+  </Step>
+  <Step title="ffmpeg binary">
+    The `FormGrabadora` recorder module calls ffmpeg directly to mux audio and video streams. Place the ffmpeg executable at the following path relative to the build output directory:
+
+    ```
+    ffmpeg\bin\ffmpeg.exe
+    ```
+
+    Download a Windows build from [ffmpeg.org](https://ffmpeg.org/download.html) and copy `ffmpeg.exe` into a `ffmpeg\bin\` folder next to the compiled `.exe`.
+  </Step>
+</Steps>
+
+## Build from Source
+
+<Steps>
+  <Step title="Clone or download the repository">
+    Clone the repository with Git or download and extract the ZIP archive from GitHub:
+
+    ```bash
+    git clone https://github.com/XxLunaxX29/ExploradorDeArchivos.git
+    ```
+  </Step>
+  <Step title="Open the solution in Visual Studio">
+    Launch Visual Studio 2022 and choose **File → Open → Project/Solution**. Navigate to the repository root and select `ExploradorDeArchivos.sln`.
+  </Step>
+  <Step title="Restore NuGet packages">
+    Visual Studio restores packages automatically on first open. To trigger it manually, right-click the solution in **Solution Explorer** and choose **Restore NuGet Packages**, or run:
+
+    ```bash
+    dotnet restore
+    ```
+  </Step>
+  <Step title="Select Release | x64 and build">
+    In the Visual Studio toolbar, set the configuration to **Release** and the platform to **x64**. Then press **Ctrl + Shift + B** (or **Build → Build Solution**) to compile the project.
+  </Step>
+  <Step title="Run the output executable">
+    After a successful build, press **F5** to launch from Visual Studio, or navigate to the output folder and run the executable directly:
+
+    ```
+    ExploradorDeArchivos\bin\x64\Release\net8.0-windows\ExploradorDeArchivos.exe
+    ```
+  </Step>
+</Steps>
+
+## NuGet Dependencies
+
+The table below lists every package declared in `ExploradorDeArchivos.csproj` and its role in the application.
+
+| Package | Purpose |
+|---|---|
+| `NAudio` 2.3.0 | Audio playback, recording, and WAV encoding in the audio player and recorder |
+| `LibVLCSharp.WinForms` 3.9.7 | Embeds a LibVLC video surface inside a WinForms panel for the video player |
+| `VideoLAN.LibVLC.Windows` 3.0.23 | Native LibVLC binaries bundled for Windows (x64) |
+| `TagLibSharp` 2.3.0 | Reading and writing ID3 tags, embedded album art, and audio metadata |
+| `AForge.Video.DirectShow` 2.2.5 | Webcam and DirectShow device capture for the screen recorder |
+| `FFMpegCore` 5.4.0 | Audio-video muxing and transcoding via the local ffmpeg binary |
+| `SharpAvi` 3.0.1 | Writing AVI video files from captured frames |
+| `CsvHelper` 33.1.0 | High-performance CSV parsing and serialization for the Data Fusion Arena |
+| `DocumentFormat.OpenXml` 3.5.1 | Reading and writing Excel (.xlsx) and Word (.docx) files |
+| `Npgsql` 10.0.2 | PostgreSQL database connectivity |
+| `MySqlConnector` 2.5.0 | MariaDB and MySQL database connectivity |
+| `Microsoft.Data.SqlClient` 7.0.1 | SQL Server database connectivity |
+| `SpotifyAPI.Web` 7.4.2 | Fetching album art from the Spotify Web API in the audio player |
+| `Genius.NET` 4.0.1 | Song metadata lookup via the Genius API |
+| `GeniusLyricsAPI` 1.0.0 | Lyrics retrieval for the audio player |
+| `MailKit` 4.16.0 | Composing and sending emails with attachments |
+| `MetadataExtractor` 2.8.1 | Reading EXIF, GPS, and camera metadata from image files |
+| `FluentValidation` 12.1.1 | Rule-based data validation in the Data Cleaner module |
+| `HtmlAgilityPack` 1.12.4 | HTML parsing and scraping |
+| `MusicBrainzAPI` 4.1.0 | Music metadata lookup from the MusicBrainz database |
+| `Microsoft.Web.WebView2` 1.0.4015 | Embedded Chromium web view for HTML content |
+| `System.Windows.Forms.DataVisualization` 1.0.0 | Chart rendering in the Data Fusion Arena |
+| `System.Linq.Dynamic.Core` 1.7.2 | Runtime-evaluated LINQ expressions for dynamic data queries |
+| `Newtonsoft.Json` 13.0.4 | JSON serialization and deserialization |
+| `ID3` 0.6.0 | Additional ID3 tag parsing for audio files |
+| `MP3Sharp` 1.0.5 | Pure-managed MP3 decoding |
+
+<Warning>
+  Custom icon image paths are hardcoded in `Form1.cs`, `FormMP3.cs`, and `FormMP4.cs` using an absolute path on the original developer's machine (e.g. `C:\Users\josel\Downloads\`). Before building, search for these hardcoded paths in each file and update them to point to the icon image files on your own machine — or place the image files at the same path — otherwise the application will silently display no icons at startup.
+</Warning>
